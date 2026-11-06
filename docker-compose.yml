@@ -1,0 +1,76 @@
+# TransitIQ local stack (Phase 0).
+# Everything here runs on YOUR machine in Docker. Nothing here touches real AWS.
+name: transitiq
+
+services:
+  localstack:
+    image: localstack/localstack:2026.3.0
+    container_name: transitiq-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:?Set LOCALSTACK_AUTH_TOKEN in .env (free Hobby plan)}
+      SERVICES: s3,lambda,events,sqs,iam,logs,sts
+      DEBUG: "0"
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock # Lambda runs in sibling containers
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: transitiq-postgres
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-transitiq}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-transitiq_local_only}
+      POSTGRES_DB: ${POSTGRES_DB:-transitiq}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  airflow:
+    image: apache/airflow:3.1.0-python3.12
+    container_name: transitiq-airflow
+    command: standalone
+    user: "${AIRFLOW_UID:-50000}:0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${AIRFLOW_HOST_PORT:-8080}:8080"
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-transitiq}:${POSTGRES_PASSWORD:-transitiq_local_only}@postgres:5432/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "True"
+      # Local development only: every visitor is admin, so there is no login screen.
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "True"
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+      LOCALSTACK_ENDPOINT: http://localstack:4566
+    volumes:
+      - ./pipelines/airflow/dags:/opt/airflow/dags
+      - ./pipelines/airflow/logs:/opt/airflow/logs
+      - ./pipelines/airflow/plugins:/opt/airflow/plugins
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+
+volumes:
+  localstack-data:
+  postgres-data:

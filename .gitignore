@@ -1,0 +1,52 @@
+# Secrets
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Data (bronze/silver/gold files are rebuilt, never committed)
+data/*
+!data/.gitkeep
+
+# Airflow runtime
+pipelines/airflow/logs/*
+!pipelines/airflow/logs/.gitkeep
+airflow.db
+standalone_admin_password.txt
+
+# Terraform
+infra/terraform/**/.terraform/
+infra/terraform/**/*.tfstate
+infra/terraform/**/*.tfstate.*
+infra/terraform/**/.terraform.lock.hcl.bak
+*.tfplan
+
+# dbt
+dbt/**/target/
+dbt/**/dbt_packages/
+dbt/**/logs/
+
+# ML
+mlruns/
+mlartifacts/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
