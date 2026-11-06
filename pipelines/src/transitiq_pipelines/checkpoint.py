@@ -10,10 +10,11 @@ loses at most the partition in flight. Thread-safe for parallel downloads.
 from __future__ import annotations
 
 import json
-import os
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
+
+from transitiq_pipelines.fsutil import atomic_replace
 
 
 class Checkpoint:
@@ -37,7 +38,7 @@ class Checkpoint:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_name(self.path.name + ".tmp")
             tmp.write_text(json.dumps(self.data, indent=2, sort_keys=True), "utf-8")
-            os.replace(tmp, self.path)
+            atomic_replace(tmp, self.path)
 
     def partitions(self) -> dict[str, dict]:
         with self._lock:
