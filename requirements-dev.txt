@@ -1,3 +1,6 @@
-# Dev tooling for Phase 0. Later phases add their own requirements files per package.
+# Dev tooling. Later phases add their own requirements files per package.
 pytest==8.3.4
 ruff==0.8.4
+# AWS SDK (also preinstalled in the Lambda python3.12 runtime) and moto for mocked-AWS unit tests
+boto3==1.43.100
+moto[s3]==5.2.2

@@ -1,0 +1,8 @@
+{"record_id": "r1", "source": "e2e_sample", "observed_at": "2026-11-01T08:00:00-05:00", "payload": {"route": "Red", "delay_s": 120}}
+{"record_id": "r2", "source": "e2e_sample", "observed_at": "2026-11-01T13:05:00Z", "payload": {"route": "Orange", "delay_s": 0}}
+{"record_id": "r3", "source": "e2e_sample", "observed_at": "2026-11-01T13:06:00Z", "payload": {"route": "39"
+{"record_id": "r4", "source": "e2e_sample", "payload": {"route": "Green-B"}}
+{"record_id": "r5", "source": "e2e_sample", "observed_at": "yesterday morning", "payload": {"route": "Blue"}}
+{"record_id": "r1", "source": "e2e_sample", "observed_at": "2026-11-01T08:01:00-05:00", "payload": {"route": "Red", "delay_s": 180}}
+{"record_id": "r6", "source": "e2e_sample", "observed_at": "2026-11-01T14:00:00+00:00", "payload": {"route": "1", "delay_s": 45}}
+
