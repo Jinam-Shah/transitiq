@@ -30,6 +30,6 @@ output "validate_role" {
   value = aws_iam_role.validate.name
 }
 
-output "ingest_schedule_rule" {
-  value = aws_cloudwatch_event_rule.ingest_schedule.name
+output "ingest_schedule_rules" {
+  value = { for k, r in aws_cloudwatch_event_rule.ingest : k => r.name }
 }

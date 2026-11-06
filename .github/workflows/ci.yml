@@ -69,6 +69,8 @@ jobs:
     # Secrets are not passed to workflows from forks, so this job skips itself there.
     env:
       LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
+      # Optional: without it the Lambda calls the MBTA API keyless (lower rate limit).
+      TF_VAR_mbta_api_key: ${{ secrets.MBTA_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - name: Check for LocalStack token

@@ -1,5 +1,5 @@
 locals {
-  lambda_src = "${path.module}/../../pipelines/lambdas"
+  pipelines_src = "${path.module}/../../pipelines/src"
   functions = {
     ingest   = "${local.name_prefix}-ingest"
     validate = "${local.name_prefix}-validate"
@@ -8,19 +8,15 @@ locals {
 
 data "aws_caller_identity" "current" {}
 
-# ---------- packaging (stdlib + boto3 only, so no dependency layer is needed) ----------
-data "archive_file" "ingest" {
+# ---------- packaging ----------
+# One zip of the transitiq_pipelines package serves both functions (different handlers).
+# The code Lambda imports is stdlib + boto3 only, so no dependency layer is needed;
+# pyarrow is imported lazily and only by local backfills.
+data "archive_file" "pipelines" {
   type        = "zip"
-  source_dir  = "${local.lambda_src}/ingest"
-  output_path = "${path.module}/build/ingest.zip"
-  excludes    = ["__pycache__"]
-}
-
-data "archive_file" "validate" {
-  type        = "zip"
-  source_dir  = "${local.lambda_src}/validate"
-  output_path = "${path.module}/build/validate.zip"
-  excludes    = ["__pycache__"]
+  source_dir  = local.pipelines_src
+  output_path = "${path.module}/build/pipelines.zip"
+  excludes    = ["**/__pycache__/**", "**/*.pyc", "*.egg-info/**"]
 }
 
 # ---------- log groups (created first so Lambda never needs logs:CreateLogGroup) ----------
@@ -39,15 +35,16 @@ resource "aws_lambda_function" "ingest" {
   function_name    = local.functions.ingest
   role             = aws_iam_role.ingest.arn
   runtime          = var.lambda_runtime
-  handler          = "handler.handler"
-  filename         = data.archive_file.ingest.output_path
-  source_code_hash = data.archive_file.ingest.output_base64sha256
+  handler          = "transitiq_pipelines.lambdas.ingest.handler"
+  filename         = data.archive_file.pipelines.output_path
+  source_code_hash = data.archive_file.pipelines.output_base64sha256
   timeout          = 60
   memory_size      = 256
 
   environment {
     variables = {
       BRONZE_BUCKET = aws_s3_bucket.lake["bronze"].bucket
+      MBTA_API_KEY  = var.mbta_api_key
       LOG_LEVEL     = "INFO"
     }
   }
@@ -63,9 +60,9 @@ resource "aws_lambda_function" "validate" {
   function_name    = local.functions.validate
   role             = aws_iam_role.validate.arn
   runtime          = var.lambda_runtime
-  handler          = "handler.handler"
-  filename         = data.archive_file.validate.output_path
-  source_code_hash = data.archive_file.validate.output_base64sha256
+  handler          = "transitiq_pipelines.lambdas.validate.handler"
+  filename         = data.archive_file.pipelines.output_path
+  source_code_hash = data.archive_file.pipelines.output_base64sha256
   timeout          = 120
   memory_size      = 512
 

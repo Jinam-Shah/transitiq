@@ -1,4 +1,4 @@
-"""End-to-end check of the Phase 1 stack on LocalStack (NOT real AWS).
+"""End-to-end check of the ingestion stack on LocalStack (NOT real AWS).
 
 Prerequisites: LocalStack running (docker compose up -d localstack) and
 `terraform -chdir=infra/terraform apply` done.
@@ -11,6 +11,7 @@ Checks:
      bronze produces exactly 3 silver rows and 4 quarantined rows with reasons.
   4. Idempotency: uploading the same file to the same key again leaves 3 + 4 rows.
   5. DLQ: the dead-letter queue exists and is empty.
+  6. Live source: the ingest Lambda fetches a real MBTA V3 alerts snapshot into bronze.
 
 Prints a JSON summary with measured timings; copy real values into METRICS.md.
 """
@@ -165,6 +166,20 @@ def main() -> int:
             summary["fixture_quarantine_rate"] = (
                 round(len(quarantined) / total, 4) if total else None
             )
+
+    # 6. Live MBTA V3 alerts snapshot via the Lambda (needs internet from LocalStack)
+    t0 = time.monotonic()
+    resp = lam.invoke(
+        FunctionName=out["ingest_function"], Payload=json.dumps({"source": "mbta_v3_alerts"})
+    )
+    payload = json.loads(resp["Payload"].read())
+    ok = "FunctionError" not in resp
+    check(ok, f"ingest Lambda fetched live V3 alerts ({payload})", failures)
+    if ok:
+        summary["v3_alerts_lambda_seconds"] = round(time.monotonic() - t0, 2)
+        summary["v3_alerts_rows"] = payload["records"]
+        head = s3.head_object(Bucket=out["bronze_bucket"], Key=payload["key"])
+        check(head["ContentLength"] > 0, "V3 alerts snapshot is in bronze", failures)
 
     # 5. DLQ exists and is empty
     attrs = sqs.get_queue_attributes(

@@ -36,10 +36,21 @@ variable "log_retention_days" {
   default = 14
 }
 
-variable "ingest_schedule" {
-  description = "EventBridge schedule for the ingest Lambda."
+variable "ingest_schedules" {
+  description = "EventBridge schedule per ingest source (the event sent is {source = <key>})."
+  type        = map(string)
+  default = {
+    heartbeat          = "rate(1 day)"
+    mbta_v3_alerts     = "rate(30 minutes)"
+    mbta_v3_facilities = "rate(1 day)"
+  }
+}
+
+variable "mbta_api_key" {
+  description = "MBTA V3 API key for the ingest Lambda. Pass with TF_VAR_mbta_api_key; empty = keyless (lower rate limit)."
   type        = string
-  default     = "rate(1 day)"
+  default     = ""
+  sensitive   = true
 }
 
 variable "quarantine_expiry_days" {
