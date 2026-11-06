@@ -1,0 +1,3 @@
+# Dev tooling for Phase 0. Later phases add their own requirements files per package.
+pytest==8.3.4
+ruff==0.8.4
