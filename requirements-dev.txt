@@ -1,6 +1,6 @@
-# Dev tooling. Later phases add their own requirements files per package.
+# Dev tooling. Installs the transitiq package itself in editable mode (-e .), which gives
+# you the `transitiq-ingest` command and its runtime dependencies (pyarrow, boto3).
+-e .
 pytest==8.3.4
 ruff==0.8.4
-# AWS SDK (also preinstalled in the Lambda python3.12 runtime) and moto for mocked-AWS unit tests
-boto3==1.43.100
 moto[s3]==5.2.2

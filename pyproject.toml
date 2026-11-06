@@ -1,22 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "transitiq"
-version = "0.0.1"
+version = "0.2.0"
 description = "Boston transit reliability platform built on MBTA data"
 requires-python = ">=3.12"
+dependencies = [
+  "pyarrow==21.0.0",  # Parquet row counts during ingestion; silver/gold work in later phases
+  "boto3==1.43.100",  # S3 bronze store (also preinstalled in the Lambda runtime)
+]
+
+[project.scripts]
+transitiq-ingest = "transitiq_pipelines.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["pipelines/src"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["pipelines/airflow/logs", "web", "dbt"]
+extend-exclude = ["pipelines/airflow/logs", "web", "dbt", "data"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S"]
 ignore = []
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]
+"tests/**" = ["S101", "S105", "S106"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["tests", "scripts"]
+pythonpath = ["tests", "scripts", "pipelines/src"]
 addopts = "-q"

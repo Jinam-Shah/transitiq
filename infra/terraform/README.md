@@ -2,11 +2,12 @@
 
 The AWS ingestion design for TransitIQ, defined in Terraform and deployed to **LocalStack** (an AWS emulator in Docker). **Nothing here runs on real AWS.**
 
-## What it creates (27 resources)
+## What it creates (33 resources)
 
 ```mermaid
 flowchart LR
-  EB[EventBridge rule<br/>rate 1 day] --> ING[Lambda: ingest]
+  EB[EventBridge rules<br/>V3 alerts 30 min, facilities daily, heartbeat daily] --> ING[Lambda: ingest]
+  ING -->|HTTPS| V3[MBTA V3 API]
   ING -->|PutObject| BR[(S3 bronze<br/>versioned, immutable)]
   BR -->|ObjectCreated *.jsonl| VAL[Lambda: validate]
   VAL -->|valid rows + lineage| SI[(S3 silver)]
@@ -23,10 +24,10 @@ flowchart LR
 | `sqs.tf` | Dead-letter queue |
 | `iam.tf` | One least-privilege role per Lambda (no wildcard actions, no `*` resources) |
 | `lambda.tf` | Lambda packaging, functions, log groups, retry config, S3 invoke permission |
-| `eventbridge.tf` | Schedule rule and target for the ingest Lambda |
+| `eventbridge.tf` | One schedule per ingest source (`var.ingest_schedules`) |
 | `outputs.tf` | Names used by `scripts/e2e_localstack.py` |
 
-Lambda source code lives in `pipelines/lambdas/`.
+Lambda code is the `transitiq_pipelines` package in `pipelines/src` (handlers in `transitiq_pipelines/lambdas/`). Optional: `$env:TF_VAR_mbta_api_key = "<your key>"` before `apply` gives the Lambda the higher MBTA rate limit.
 
 ## Deploy (from the repo root)
 
@@ -40,5 +41,6 @@ terraform -chdir=infra/terraform destroy
 
 ## Honest limitations
 
+- LocalStack's free plan has no persistence: buckets are emptied when the container restarts (D-009).
 - LocalStack's free plan does not enforce IAM. The e2e script checks the deployed policies statically instead (D-007).
 - State is a local file, fine for a single developer on an emulator; real AWS would use a remote S3 backend with locking.

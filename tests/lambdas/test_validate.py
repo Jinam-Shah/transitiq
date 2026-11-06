@@ -3,10 +3,8 @@ from pathlib import Path
 
 import boto3
 import pytest
-from conftest import load_module
 from moto import mock_aws
-
-validate = load_module("pipelines/lambdas/validate/handler.py", "validate_handler")
+from transitiq_pipelines.lambdas import validate
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "sample_bronze.jsonl"
 GOOD = {"record_id": "r1", "source": "s", "observed_at": "2026-11-01T08:00:00Z", "payload": {}}

@@ -66,3 +66,30 @@ Each entry: problem, options, choice, reason, cost impact.
 
 - **Choice:** Terraform 1.17.1 in CI (`>= 1.9` allowed locally), AWS provider `~> 6.0` (lock file pins 6.72.0), archive provider `~> 2.7` (2.8.1). The lock file includes Windows, Linux and macOS hashes so `terraform init` behaves the same on every machine.
 - **Reason:** Current stable releases at the time of writing; the lock file makes builds reproducible.
+
+## D-009: Durable bronze on local disk; LocalStack S3 for the Lambda path (2026-11-06)
+
+- **Problem:** Phase 2 must hold months of history in bronze. LocalStack keeps state only in memory unless persistence is enabled, and persistence is listed only for the paid Base and Ultimate plans (docs.localstack.cloud, checked 2026-11-06). A restart would wipe a year of backfill.
+- **Options:** (a) bronze only in LocalStack S3, re-downloading after every restart; (b) MinIO (a free S3-compatible server) in docker-compose; (c) a local folder with the same key layout as S3, plus the S3 store for the Lambda path.
+- **Choice:** (c). One `BronzeStore` interface with two implementations: `LocalBronzeStore` (`data/bronze/`, durable) and `S3BronzeStore` (LocalStack bucket). The backfill CLI defaults to local; `--store s3` writes to LocalStack. The scheduled Lambda writes live V3 snapshots to S3 to demonstrate the AWS design.
+- **Reason:** No new service to run, no repeated multi-hundred-MB downloads, and DuckDB/PyIceberg read local Parquet directly in Phase 3. Keys are identical in both stores, so moving to real S3 is a configuration change. MinIO would add a second S3 emulator next to LocalStack and confuse the "where it runs" story.
+- **Honest limit:** The data in LocalStack's bucket is a demo of the design, not the system of record. The README says so.
+- **Cost impact:** $0. Roughly 0.7 GB of disk for a year of history (to be measured and recorded in METRICS.md).
+
+## D-010: One pipelines package for the CLI and the Lambdas (2026-11-06)
+
+- **Problem:** The same fetch-and-store logic is needed locally (backfill) and in Lambda (scheduled snapshots). Copying code into each Lambda folder would drift.
+- **Choice:** An installable package, `transitiq_pipelines` (`pipelines/src`), with a stdlib-only core (HTTP with retries, storage, checkpoints). Terraform zips the package once and both Lambdas use different handlers. Heavy libraries (pyarrow) are imported lazily, only by local backfills; a test-style check confirms the Lambda modules import without pyarrow.
+- **Reason:** One implementation, unit-tested once. Stdlib + boto3 keeps the Lambda zip small (no layer) and avoids Windows build steps.
+- **Cost impact:** $0.
+
+## D-011: Bronze immutability and idempotent re-runs (2026-11-06)
+
+- **Problem:** Re-running a backfill must never create duplicates, and bronze must never be overwritten, yet upstream files (LAMP days, the alerts file, GTFS) are republished in place.
+- **Choice:**
+  - Every key includes the **upstream version** (LAMP `last_modified`, GTFS `ETag`, or our fetch timestamp for API snapshots), so a republished file becomes a **new** key and older versions are kept.
+  - Writes refuse existing keys: local writes check first and rename atomically; S3 writes use a conditional put (`IfNoneMatch="*"`), which also means the ingest role needs no read permission.
+  - Per-source **checkpoints** (`data/checkpoints/<source>.json`) record what was fetched and at which version; re-runs skip finished partitions, and failed partitions are retried on the next run.
+  - Weather months are only marked complete once they ended at least 7 days ago (archive lag); before that they are stored as dated `_partial_` files.
+- **Reason:** Replays are cheap and safe, and silver (Phase 3) can always pick the newest version per partition while bronze keeps the full history of what upstream published.
+- **Cost impact:** Slightly more disk when upstream republishes. LAMP republished all historical days on 2026-10-22, so expect occasional full re-downloads of the range you keep.
