@@ -12,6 +12,8 @@ services:
       LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:?Set LOCALSTACK_AUTH_TOKEN in .env (free Hobby plan)}
       SERVICES: s3,lambda,events,sqs,iam,logs,sts
       DEBUG: "0"
+      # Lambda containers join the compose network so they can reach LocalStack.
+      LAMBDA_DOCKER_NETWORK: transitiq_default
     volumes:
       - localstack-data:/var/lib/localstack
       - /var/run/docker.sock:/var/run/docker.sock # Lambda runs in sibling containers

@@ -2,7 +2,7 @@
 
 **Boston transit reliability, measured, not scheduled.** TransitIQ tells MBTA riders when the train *actually* comes, gives each rider a "leave by" time they can trust, and surfaces problems the official apps don't show: ghost trips, bus bunching, and elevator outages.
 
-> **Status:** Phase 0 (repo setup). Nothing is deployed yet. Every feature below is planned.
+> **Status:** Phase 1 (AWS ingestion design on LocalStack). Nothing is deployed to a hosted service yet.
 
 ## Where it runs
 
@@ -10,7 +10,7 @@ This table is kept honest as the project grows. "LocalStack" means an AWS emulat
 
 | Part | Runs on | Status |
 |---|---|---|
-| AWS ingestion design (S3, Lambda, EventBridge, SQS, IAM) | LocalStack (free Hobby plan) in Docker, locally and in CI | Container starts (Phase 0); infra in Phase 1 |
+| AWS ingestion design (S3, Lambda, EventBridge, SQS, IAM) | LocalStack (free Hobby plan) in Docker, locally and in CI. **Not real AWS.** | Deployed by Terraform and tested end to end (Phase 1) |
 | Postgres (app DB + Airflow metadata) | Local Docker | Container starts (Phase 0) |
 | Airflow orchestration | Local Docker (`airflow standalone`) | Container starts (Phase 0) |
 | Historical backfill, Iceberg, dbt, model training | Local Docker | Planned |
@@ -55,9 +55,22 @@ python scripts\smoke_test.py
 
 Stop everything with `docker compose down` (add `-v` to delete data volumes).
 
+## AWS ingestion design (Phase 1, on LocalStack)
+
+EventBridge triggers an **ingest** Lambda that writes raw NDJSON to the **bronze** bucket. Each new bronze file triggers a **validate** Lambda that writes valid rows (with lineage columns) to **silver** and rejected rows (with a reason) to **quarantine**. Failed async events go to an **SQS dead-letter queue**. Details and diagram: [infra/terraform/README.md](infra/terraform/README.md).
+
+Needs [Terraform](https://developer.hashicorp.com/terraform/install) 1.9 or newer.
+
+```powershell
+docker compose up -d --wait localstack
+terraform -chdir=infra/terraform init
+terraform -chdir=infra/terraform apply
+python scripts\e2e_localstack.py
+```
+
 ## CI
 
-GitHub Actions runs Ruff, pytest, a docker-compose validation, and (when the `LOCALSTACK_AUTH_TOKEN` repo secret is set) starts LocalStack and Postgres and runs the smoke test.
+GitHub Actions runs Ruff, pytest (including moto-mocked Lambda tests), `terraform fmt` and `terraform validate`, and a docker-compose validation. When the `LOCALSTACK_AUTH_TOKEN` repo secret is set, it also starts LocalStack, runs `terraform apply`, runs the end-to-end check, and destroys the stack.
 
 ## Docs
 
@@ -67,7 +80,8 @@ GitHub Actions runs Ruff, pytest, a docker-compose validation, and (when the `LO
 
 ## Known limitations (so far)
 
-- LocalStack's free Hobby plan does **not enforce IAM policies**, so least-privilege IAM is written and statically checked but not proven by LocalStack. See D-002.
+- LocalStack's free Hobby plan does **not enforce IAM policies**. Least-privilege IAM is written in Terraform and the deployed policies are checked by code, but LocalStack does not prove AWS would deny a call. See D-002 and D-007.
+- Silver is NDJSON until Phase 3 switches it to Parquet + Iceberg (D-006).
 - Airflow runs in single-container `standalone` mode with login disabled. Local development only.
 
 ## Credits

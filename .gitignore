@@ -30,6 +30,7 @@ infra/terraform/**/*.tfstate
 infra/terraform/**/*.tfstate.*
 infra/terraform/**/.terraform.lock.hcl.bak
 *.tfplan
+infra/terraform/build/
 
 # dbt
 dbt/**/target/
