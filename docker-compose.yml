@@ -73,6 +73,23 @@ services:
       retries: 20
       start_period: 60s
 
+  # Tools container (not started by `docker compose up`). Usage:
+  #   docker compose run --rm pipelines transitiq-silver build
+  #   docker compose run --rm pipelines pytest
+  pipelines:
+    build:
+      context: .
+      dockerfile: pipelines/Dockerfile
+    image: transitiq-pipelines:local
+    profiles: ["tools"]
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+
 volumes:
   localstack-data:
   postgres-data:

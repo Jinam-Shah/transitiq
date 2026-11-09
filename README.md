@@ -2,7 +2,7 @@
 
 **Boston transit reliability, measured, not scheduled.** TransitIQ tells MBTA riders when the train *actually* comes, gives each rider a "leave by" time they can trust, and surfaces problems the official apps don't show: ghost trips, bus bunching, and elevator outages.
 
-> **Status:** Phase 2 (ingestion: a year of MBTA history plus weather in bronze). Nothing is deployed to a hosted service yet.
+> **Status:** Phase 3 (validated silver tables in Apache Iceberg). Nothing is deployed to a hosted service yet.
 
 ## Where it runs
 
@@ -14,7 +14,8 @@ This table is kept honest as the project grows. "LocalStack" means an AWS emulat
 | Postgres (app DB + Airflow metadata) | Local Docker | Container starts (Phase 0) |
 | Airflow orchestration | Local Docker (`airflow standalone`) | Container starts (Phase 0) |
 | Historical backfill into bronze (`transitiq-ingest`) | Python on the laptop, writing to `data/bronze/` (durable). See D-009. | Built (Phase 2) |
-| Iceberg, dbt, model training | Local Docker | Planned |
+| Silver Iceberg tables (`transitiq-silver`) | `pipelines` Docker container on the laptop (Linux; D-012), writing to `data/warehouse/` | Built (Phase 3) |
+| dbt, model training | Local Docker (same image) | Planned |
 | Gold tables for the app | Neon PostgreSQL free tier | Planned |
 | Backend API | Render free tier | Planned |
 | Frontend | Vercel free tier | Planned |
@@ -77,6 +78,29 @@ transitiq-ingest report
 
 Every run writes `data/runs/<time>_<source>.json` (rows, bytes, duration, failures): the evidence behind METRICS.md.
 
+## Silver layer (Phase 3)
+
+`transitiq-silver` validates bronze into typed, deduplicated **Apache Iceberg** tables (PyIceberg, SQLite catalog in `data/warehouse/`). Rejected rows go to `data/quarantine/<table>/` with a reason. Every row carries lineage (`_source_file`, `_source_sha256`, `_loaded_at`). Re-runs skip unchanged inputs; replays never duplicate rows.
+
+Runs in Docker because PyIceberg cannot yet handle Windows paths (D-012):
+
+```powershell
+docker compose build pipelines
+docker compose run --rm pipelines transitiq-silver build
+docker compose run --rm pipelines transitiq-silver report
+docker compose run --rm pipelines pytest          # full test suite on Linux
+```
+
+| Table | From | Grain | Key rules (rejection reason) |
+|---|---|---|---|
+| `subway_events` | LAMP subway | one arrival/departure event; partitioned by `service_date` | duplicate_event, negative_duration, no_timestamps, implausible_travel/dwell_time, timestamp_outside_service_day, service_date_mismatch |
+| `alerts` | LAMP alerts history | one alert version × informed entity | end_before_start, duplicate_row, missing ids |
+| `weather_hourly` | Open-Meteo | one hour (UTC) | missing temperature, implausible values, duplicate_hour |
+| `facilities` | MBTA V3 | one elevator/escalator | missing id/type, coordinates_out_of_range, duplicate_key |
+| `gtfs_routes`, `gtfs_stops`, `gtfs_trips`, `gtfs_stop_times`, `gtfs_calendar`, `gtfs_calendar_dates` | GTFS static | one row per GTFS record | missing required fields, invalid types/times, duplicate_key |
+
+Contracts for every table live in `pipelines/src/transitiq_pipelines/silver/contracts.py`; an upstream type change fails that partition as schema drift instead of silently breaking downstream models.
+
 ## AWS ingestion design (on LocalStack)
 
 EventBridge schedules trigger an **ingest** Lambda that writes raw files to the **bronze** bucket: live MBTA V3 alert snapshots every 30 minutes, the facility list daily, and a daily heartbeat. Each new bronze NDJSON file triggers a **validate** Lambda that writes valid rows (with lineage columns) to **silver** and rejected rows (with a reason) to **quarantine**. Failed async events go to an **SQS dead-letter queue**. Details and diagram: [infra/terraform/README.md](infra/terraform/README.md).
@@ -105,6 +129,7 @@ GitHub Actions runs Ruff, pytest (including moto-mocked Lambda tests), `terrafor
 - LocalStack's free Hobby plan does **not enforce IAM policies**. Least-privilege IAM is written in Terraform and the deployed policies are checked by code, but LocalStack does not prove AWS would deny a call. See D-002 and D-007.
 - Silver is NDJSON until Phase 3 switches it to Parquet + Iceberg (D-006).
 - LocalStack's free plan has no persistence, so its bronze bucket is wiped on restart. Durable history lives in `data/bronze/` on the laptop (D-009).
+- `transitiq-silver` must run in Docker on Windows (PyIceberg path bug, D-012).
 - No public per-day bus history was found; bus reliability will come from our own GTFS-Realtime sampling (Phase 6).
 - Airflow runs in single-container `standalone` mode with login disabled. Local development only.
 

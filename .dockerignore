@@ -1,0 +1,9 @@
+.git
+.venv
+data
+**/__pycache__
+**/*.egg-info
+infra/terraform/.terraform
+infra/terraform/build
+web/node_modules
+.env
