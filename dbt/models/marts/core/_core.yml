@@ -1,0 +1,351 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: "One row per calendar date 2018-2028 with US federal and Massachusetts holidays."
+    columns:
+      - name: date
+        data_type: date
+        data_tests:
+          - unique
+          - not_null
+      - name: year
+        data_type: integer
+      - name: month
+        data_type: integer
+      - name: day_of_week
+        data_type: integer
+      - name: day_name
+        data_type: varchar
+      - name: is_weekend
+        data_type: boolean
+      - name: holiday_name
+        data_type: varchar
+      - name: is_holiday
+        data_type: boolean
+      - name: day_type
+        data_type: varchar
+        data_tests:
+          - accepted_values: {arguments: {values: [weekday, saturday, sunday, holiday]}}
+  - name: dim_route
+    description: "One row per route (current GTFS feed)."
+    columns:
+      - name: route_id
+        data_type: varchar
+        data_tests:
+          - unique
+          - not_null
+      - name: route_name
+        data_type: varchar
+      - name: route_short_name
+        data_type: varchar
+      - name: route_type
+        data_type: integer
+      - name: mode
+        data_type: varchar
+        data_tests:
+          - accepted_values: {arguments: {values: [light_rail, subway, commuter_rail, bus, ferry, other]}}
+      - name: color
+        data_type: varchar
+      - name: line_id
+        data_type: varchar
+      - name: route_sort_order
+        data_type: integer
+  - name: dim_stop
+    description: "One row per GTFS stop (platform, station, entrance)."
+    columns:
+      - name: stop_id
+        data_type: varchar
+        data_tests:
+          - unique
+          - not_null
+      - name: stop_name
+        data_type: varchar
+      - name: parent_station
+        data_type: varchar
+      - name: station_id
+        data_type: varchar
+        data_tests:
+          - not_null
+      - name: platform_name
+        data_type: varchar
+      - name: lat
+        data_type: double
+      - name: lon
+        data_type: double
+      - name: location_type
+        data_type: integer
+      - name: wheelchair_boarding
+        data_type: integer
+      - name: municipality
+        data_type: varchar
+      - name: vehicle_type
+        data_type: integer
+  - name: dim_time_bucket
+    description: "One row per 15 minutes of the local day (96 rows)."
+    columns:
+      - name: bucket
+        data_type: integer
+        data_tests:
+          - unique
+          - not_null
+          - between: {arguments: {min_value: 0, max_value: 95}}
+      - name: bucket_start
+        data_type: varchar
+      - name: hour
+        data_type: integer
+      - name: period
+        data_type: varchar
+      - name: is_peak
+        data_type: boolean
+  - name: dim_weather_hour
+    description: "One row per hour of Boston weather (UTC hour, local date and hour)."
+    columns:
+      - name: hour_ts
+        data_type: timestamp with time zone
+        data_tests:
+          - unique
+          - not_null
+      - name: local_date
+        data_type: date
+      - name: local_hour
+        data_type: integer
+      - name: temperature_c
+        data_type: double
+      - name: humidity_pct
+        data_type: double
+      - name: precipitation_mm
+        data_type: double
+      - name: rain_mm
+        data_type: double
+      - name: snowfall_cm
+        data_type: double
+      - name: snow_depth_m
+        data_type: double
+      - name: wind_speed_kmh
+        data_type: double
+      - name: wind_gusts_kmh
+        data_type: double
+      - name: weather_code
+        data_type: integer
+      - name: condition
+        data_type: varchar
+      - name: is_snow
+        data_type: boolean
+      - name: is_rain
+        data_type: boolean
+  - name: fact_alert
+    description: "One row per alert version (alert_id, last_modified_ts)."
+    data_tests:
+      - unique_combination: {arguments: {columns: [alert_id, last_modified_ts]}}
+    columns:
+      - name: alert_id
+        data_type: bigint
+        data_tests:
+          - not_null
+      - name: last_modified_ts
+        data_type: timestamp with time zone
+        data_tests:
+          - not_null
+      - name: cause
+        data_type: varchar
+      - name: effect
+        data_type: varchar
+        data_tests:
+          - not_null
+      - name: effect_detail
+        data_type: varchar
+      - name: severity
+        data_type: integer
+      - name: severity_level
+        data_type: varchar
+      - name: alert_lifecycle
+        data_type: varchar
+      - name: header_text
+        data_type: varchar
+      - name: created_ts
+        data_type: timestamp with time zone
+      - name: closed_ts
+        data_type: timestamp with time zone
+      - name: start_ts
+        data_type: timestamp with time zone
+      - name: end_ts
+        data_type: timestamp with time zone
+        description: "Null while the alert/outage is ongoing or has no end."
+      - name: routes
+        data_type: varchar
+      - name: stops
+        data_type: varchar
+      - name: facilities
+        data_type: integer
+  - name: fact_bunching_event
+    description: "One row per historical subway bunch: headway <= 25% of scheduled."
+    data_tests:
+      - expression_is_true: {arguments: {expression: 'headway_seconds <= scheduled_headway_seconds'}}
+    columns:
+      - name: service_date
+        data_type: date
+      - name: route_id
+        data_type: varchar
+      - name: trunk_route_id
+        data_type: varchar
+      - name: direction_id
+        data_type: integer
+      - name: stop_id
+        data_type: varchar
+      - name: station_id
+        data_type: varchar
+      - name: ts
+        data_type: timestamp with time zone
+      - name: time_bucket
+        data_type: integer
+        description: "0-95: 15-minute bucket of the local (America/New_York) day."
+      - name: vehicles_involved
+        data_type: integer
+      - name: headway_seconds
+        data_type: bigint
+        data_tests:
+          - not_null
+          - positive
+      - name: scheduled_headway_seconds
+        data_type: bigint
+        data_tests:
+          - not_null
+          - positive
+      - name: gap_before_seconds
+        data_type: bigint
+      - name: after_long_gap
+        data_type: boolean
+        description: "True when the headway before the bunch was >= 150% of scheduled."
+  - name: fact_facility_outage
+    description: "One row per elevator/escalator outage and facility; end_ts null while ongoing."
+    data_tests:
+      - unique_combination: {arguments: {columns: [alert_id, facility_id]}}
+      - expression_is_true: {arguments: {expression: 'end_ts is null or end_ts >= start_ts'}}
+    columns:
+      - name: alert_id
+        data_type: bigint
+      - name: facility_id
+        data_type: varchar
+      - name: facility_type
+        data_type: varchar
+        data_tests:
+          - accepted_values: {arguments: {values: [elevator, escalator]}}
+      - name: facility_name
+        data_type: varchar
+      - name: stop_id
+        data_type: varchar
+      - name: station_id
+        data_type: varchar
+      - name: start_ts
+        data_type: timestamp with time zone
+        data_tests:
+          - not_null
+      - name: end_ts
+        data_type: timestamp with time zone
+        description: "Null while the alert/outage is ongoing or has no end."
+      - name: duration_hours
+        data_type: double
+        data_tests:
+          - between: {arguments: {min_value: 0, max_value: 100000}}
+  - name: fact_headway
+    description: "One row per observed subway arrival at a stop with the gap since the previous train."
+    columns:
+      - name: service_date
+        data_type: date
+        data_tests:
+          - not_null
+          - relationships: {arguments: {to: ref('dim_date'), field: date}}
+      - name: route_id
+        data_type: varchar
+      - name: trunk_route_id
+        data_type: varchar
+      - name: branch_route_id
+        data_type: varchar
+      - name: direction_id
+        data_type: integer
+      - name: stop_id
+        data_type: varchar
+        data_tests:
+          - not_null
+          - relationships: {arguments: {to: ref('dim_stop'), field: stop_id}, config: {severity: error, warn_if: '>0', error_if: '>1000'}}
+      - name: station_id
+        data_type: varchar
+      - name: arrival_ts
+        data_type: timestamp with time zone
+      - name: time_bucket
+        data_type: integer
+        description: "0-95: 15-minute bucket of the local (America/New_York) day."
+      - name: headway_seconds
+        data_type: bigint
+        data_tests:
+          - not_null
+          - positive
+      - name: scheduled_headway_seconds
+        data_type: bigint
+        data_tests:
+          - positive
+      - name: headway_branch_seconds
+        data_type: bigint
+      - name: scheduled_headway_branch_seconds
+        data_type: bigint
+      - name: headway_ratio
+        data_type: double
+  - name: fact_travel_time
+    description: "One row per observed segment (previous stop -> stop) of a subway trip."
+    data_tests:
+      - unique_combination: {arguments: {columns: [service_date, trip_id, vehicle_id, to_stop_id, departure_ts]}}
+    columns:
+      - name: service_date
+        data_type: date
+        data_tests:
+          - not_null
+          - relationships: {arguments: {to: ref('dim_date'), field: date}}
+      - name: route_id
+        data_type: varchar
+        data_tests:
+          - not_null
+          - relationships: {arguments: {to: ref('dim_route'), field: route_id}, config: {severity: error, warn_if: '>0', error_if: '>1000'}}
+      - name: trunk_route_id
+        data_type: varchar
+      - name: direction_id
+        data_type: integer
+      - name: trip_id
+        data_type: varchar
+      - name: vehicle_id
+        data_type: varchar
+      - name: from_stop_id
+        data_type: varchar
+        data_tests:
+          - not_null
+      - name: to_stop_id
+        data_type: varchar
+        data_tests:
+          - not_null
+          - relationships: {arguments: {to: ref('dim_stop'), field: stop_id}, config: {severity: error, warn_if: '>0', error_if: '>1000'}}
+      - name: from_station_id
+        data_type: varchar
+      - name: to_station_id
+        data_type: varchar
+      - name: departure_ts
+        data_type: timestamp with time zone
+      - name: arrival_ts
+        data_type: timestamp with time zone
+      - name: time_bucket
+        data_type: integer
+        description: "0-95: 15-minute bucket of the local (America/New_York) day."
+        data_tests:
+          - not_null
+          - relationships: {arguments: {to: ref('dim_time_bucket'), field: bucket}}
+      - name: weather_hour_ts
+        data_type: timestamp with time zone
+      - name: travel_seconds
+        data_type: bigint
+        data_tests:
+          - not_null
+          - positive
+      - name: scheduled_seconds
+        data_type: bigint
+      - name: delay_seconds
+        data_type: bigint
+        description: "Actual minus scheduled segment travel time."

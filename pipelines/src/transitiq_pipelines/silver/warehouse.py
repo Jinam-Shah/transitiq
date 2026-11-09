@@ -13,6 +13,7 @@ Runs on Linux (Docker or CI). PyIceberg cannot yet handle Windows drive-letter p
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import pyarrow as pa
@@ -25,6 +26,9 @@ from transitiq_pipelines.fsutil import atomic_replace
 from transitiq_pipelines.silver.contracts import ContractError, same_schema
 
 NAMESPACE = "silver"
+
+# Overwriting a partition that does not exist yet is normal for us (first load of a day).
+warnings.filterwarnings("ignore", message="Delete operation did not match any records")
 
 
 class Warehouse:
@@ -85,6 +89,25 @@ class Warehouse:
         return (
             table.scan(row_filter=row_filter).to_arrow() if row_filter else table.scan().to_arrow()
         )
+
+    def data_files(self, name: str) -> list[str]:
+        """Parquet files of the current snapshot, as local paths.
+
+        Our writes are copy-on-write (overwrite rewrites whole files), so the current snapshot
+        has no delete files and reading exactly these files gives exactly the table. We check
+        that instead of assuming it.
+        """
+        try:
+            table = self.catalog.load_table(f"{NAMESPACE}.{name}")
+        except NoSuchTableError:
+            return []
+        files = []
+        for task in table.scan().plan_files():
+            if task.delete_files:
+                raise ContractError(f"{name} has delete files; publish needs copy-on-write tables")
+            path = task.file.file_path
+            files.append(path.removeprefix("file://"))
+        return sorted(files)
 
     # ---------- quarantine ----------
     def write_quarantine(self, name: str, partition: str, rejected: pa.Table) -> Path | None:

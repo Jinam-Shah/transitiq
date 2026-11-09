@@ -76,6 +76,7 @@ services:
   # Tools container (not started by `docker compose up`). Usage:
   #   docker compose run --rm pipelines transitiq-silver build
   #   docker compose run --rm pipelines pytest
+  #   docker compose run --rm pipelines dbt build
   pipelines:
     build:
       context: .
@@ -89,6 +90,8 @@ services:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       AWS_DEFAULT_REGION: us-east-1
+      DBT_PROJECT_DIR: dbt
+      DBT_PROFILES_DIR: dbt
 
 volumes:
   localstack-data:

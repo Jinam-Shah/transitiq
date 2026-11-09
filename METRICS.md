@@ -44,9 +44,10 @@ Command: `docker compose run --rm pipelines transitiq-silver build`, then `trans
 | 2026-11-09 | `gtfs_routes` / `stops` / `trips` | 404 / 10,291 / 112,117 | same | 0 | 0% | | 2.95 / 0.36 / 1.91 | LOCAL-DOCKER |
 | 2026-11-09 | `gtfs_stop_times` | 2,858,761 | 2,858,761 | 0 | 0% | | 21.0 | LOCAL-DOCKER |
 | 2026-11-09 | `gtfs_calendar` / `calendar_dates` | 146 / 133 | same | 0 | 0% | | 0.18 / 0.16 | LOCAL-DOCKER |
-| 2026-11-09 | `alerts` | — | — | — | — | Failed on an intermittent DuckDB INTERNAL error; fixed (D-013); to be re-run | — | LOCAL-DOCKER |
+| 2026-11-09 | `alerts` (versions since 2018) | 5,171,976 | 5,171,906 | 70 | 0.001% | end_before_start 70 | 117.4 | LOCAL-DOCKER |
+| 2026-11-09 | **All silver tables** | **22,692,403** | | **13,918** | **0.061%** | | | LOCAL-DOCKER |
 
-Tests: 110 passed inside the container (`docker compose run --rm pipelines pytest`, 2026-11-09).
+Tests: 111 passed inside the container (`docker compose run --rm pipelines pytest`, 2026-11-09). First alerts run failed on an intermittent DuckDB INTERNAL error; fixed in D-013 and re-run above.
 
 ## Sections to fill as phases complete
 

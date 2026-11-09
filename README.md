@@ -2,7 +2,9 @@
 
 **Boston transit reliability, measured, not scheduled.** TransitIQ tells MBTA riders when the train *actually* comes, gives each rider a "leave by" time they can trust, and surfaces problems the official apps don't show: ghost trips, bus bunching, and elevator outages.
 
-> **Status:** Phase 3 (validated silver tables in Apache Iceberg). Nothing is deployed to a hosted service yet.
+> **Status:** Phase 4 (dbt gold star schema and reliability marts). Nothing is deployed to a hosted service yet.
+>
+> **dbt docs:** https://jinam-shah.github.io/transitiq/ (schema, lineage and tests; row counts there come from a small synthetic sample, not real data).
 
 ## Where it runs
 
@@ -15,7 +17,9 @@ This table is kept honest as the project grows. "LocalStack" means an AWS emulat
 | Airflow orchestration | Local Docker (`airflow standalone`) | Container starts (Phase 0) |
 | Historical backfill into bronze (`transitiq-ingest`) | Python on the laptop, writing to `data/bronze/` (durable). See D-009. | Built (Phase 2) |
 | Silver Iceberg tables (`transitiq-silver`) | `pipelines` Docker container on the laptop (Linux; D-012), writing to `data/warehouse/` | Built (Phase 3) |
-| dbt, model training | Local Docker (same image) | Planned |
+| dbt gold star schema (`dbt build`) | `pipelines` Docker container, DuckDB file `data/warehouse/transitiq.duckdb` | Built (Phase 4) |
+| dbt docs | GitHub Pages, built in CI from synthetic sample data | Built (Phase 4) |
+| Model training | Local Docker (same image) | Planned |
 | Gold tables for the app | Neon PostgreSQL free tier | Planned |
 | Backend API | Render free tier | Planned |
 | Frontend | Vercel free tier | Planned |
@@ -100,6 +104,29 @@ docker compose run --rm pipelines pytest          # full test suite on Linux
 | `gtfs_routes`, `gtfs_stops`, `gtfs_trips`, `gtfs_stop_times`, `gtfs_calendar`, `gtfs_calendar_dates` | GTFS static | one row per GTFS record | missing required fields, invalid types/times, duplicate_key |
 
 Contracts for every table live in `pipelines/src/transitiq_pipelines/silver/contracts.py`; an upstream type change fails that partition as schema drift instead of silently breaking downstream models.
+
+## Gold layer (Phase 4, dbt)
+
+dbt (dbt-duckdb) builds the star schema from the silver views. Every gold model has an **enforced contract** (declared column types) and data tests.
+
+```powershell
+docker compose run --rm pipelines transitiq-silver publish   # silver Iceberg -> DuckDB views
+docker compose run --rm pipelines dbt build                  # models + contracts + tests
+docker compose run --rm pipelines dbt source freshness       # is silver up to date?
+```
+
+| Model | Grain |
+|---|---|
+| `dim_route`, `dim_stop`, `dim_date`, `dim_time_bucket`, `dim_weather_hour` | route, stop, date (with holidays and day type), 15-minute local bucket, weather hour |
+| `fact_travel_time` | observed segment (previous stop -> stop) with scheduled time and delay |
+| `fact_headway` | observed arrival with headway vs scheduled |
+| `fact_bunching_event` | historical subway bunch (headway <= 25% of scheduled) |
+| `fact_alert` | alert version |
+| `fact_facility_outage` | elevator/escalator outage per facility |
+| `mart_reliability_route_hour` | route x day type x 15-minute bucket: on-time rate, travel-time ratio p50/p90, headway CV and adherence, bunching index |
+| `mart_stop_reliability` | stop x day type x 15-minute bucket: expected wait, headway p50/p90, reliability score |
+
+Metric definitions: [D-015](docs/DECISIONS.md). Ghost trips and model predictions arrive in Phases 6 and 7.
 
 ## AWS ingestion design (on LocalStack)
 

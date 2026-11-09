@@ -113,3 +113,30 @@ Each entry: problem, options, choice, reason, cost impact.
   - **Checkpoints** per table record the bronze version and counts per partition; re-runs skip unchanged inputs; `--force` replays; `--rebuild` drops and recreates after a deliberate contract change.
 - **Things real data taught us (fixed and covered by tests):** DuckDB auto-detects `name=value` folders as Hive partitions and silently replaced LAMP's integer `service_date` with the folder's text value, so all reads set `hive_partitioning = false`. DuckDB's CSV sniffer mis-read a quoted GTFS headsign containing commas, so the CSV dialect is explicit. About 22% of LAMP alert rows legitimately have no active-period start, so that is not a rejection rule. On the full alerts file inside Docker, DuckDB intermittently raised an INTERNAL integer-cast error tied to a `hash()` (UBIGINT) dedupe column; duplicates are now found by partitioning on the raw key columns instead (same results, same speed).
 - **Cost impact:** $0. Everything runs locally.
+
+## D-014: dbt reads silver through DuckDB views over the current Iceberg files (2026-11-09)
+
+- **Problem:** dbt-duckdb must read the Iceberg tables written by PyIceberg into a SQLite catalog.
+- **Options:** (a) DuckDB's `iceberg` extension (downloaded at runtime; reads a metadata file path, not a SQLite catalog), (b) dbt-duckdb's PyIceberg plugin (loads whole tables into memory; `subway_events` is 14.5M rows), (c) ask PyIceberg for the current snapshot's data files and create `silver.<table>` views over exactly those Parquet files.
+- **Choice:** (c), as `transitiq-silver publish`. It refuses to publish a table that has delete files, because our writes are copy-on-write and a view over data files alone would then be wrong. Missing tables become empty, typed views, so dbt always compiles.
+- **Reason:** No runtime downloads, streaming reads by DuckDB, and correctness is checked rather than assumed.
+- **Cost impact:** $0.
+
+## D-015: Metric definitions used in the gold layer (2026-11-09)
+
+These are TransitIQ's definitions, not official MBTA metrics; all thresholds are dbt `vars` in `dbt/dbt_project.yml`.
+- **Segment:** previous stop to this stop on the same trip. LAMP's `travel_time_seconds` equals arrival at this stop minus departure from the previous one (checked on real trips).
+- **On time (segment):** actual travel <= scheduled + 60 s.
+- **Headway regularity:** coefficient of variation (stddev / mean) of observed headways. **Headway adherence / stop reliability score:** share of headways <= 150% of scheduled.
+- **Bunching (historical subway):** a train arriving within 25% of the scheduled headway of the train before it at the same stop; `after_long_gap` marks bunches preceded by a headway >= 150% of scheduled. Bus bunching follows from real-time sampling in Phase 6.
+- **Expected wait:** for a rider arriving at a random time, E[h^2] / (2 E[h]), which grows with irregular headways even when the average headway is unchanged.
+- **Peak periods:** 07:00-09:00 and 16:00-18:30 local time.
+- **Day type:** weekday, saturday, sunday, holiday (US federal holidays plus Patriots' Day, generated from the rules by `scripts/make_holidays.py`).
+- **Facility outage:** an elevator/escalator closure alert per facility; starts at the first active period (or creation), ends at closure or the last active end; open outages have a null end.
+- **Keys:** natural keys from the sources (route_id, stop_id, date, bucket). Surrogate keys would add joins without benefit at this scale.
+
+## D-016: dbt in the Docker image; public docs built from synthetic data (2026-11-09)
+
+- **Choice:** dbt-core 1.11.16 + dbt-duckdb 1.11.0 are installed only in the `pipelines` image (`requirements-dbt.txt`). Gold models are DuckDB tables in `data/warehouse/transitiq.duckdb`, schema `gold`, with **enforced dbt contracts** (every column's type is declared, and dbt fails if the SQL produces anything else). The CI job builds a small, internally consistent synthetic warehouse (`transitiq-silver sample`), runs `dbt build` on it, and publishes `dbt docs generate --static` to GitHub Pages.
+- **Reason:** dbt pulls many compiled packages and Windows Smart App Control has already blocked one compiled dependency, so Docker keeps local and CI identical. Real data never goes into Git or CI; the docs describe the schema, lineage and tests, and their row counts come from the synthetic sample (stated on the docs link in the README).
+- **Cost impact:** $0. GitHub Pages is free for public repositories.

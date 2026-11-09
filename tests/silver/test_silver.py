@@ -440,3 +440,18 @@ def test_alert_rules(tmp_path):
         "end_before_start": 1,
         "missing_field:effect": 1,
     }
+
+
+@windows_skip
+def test_sample_warehouse_publishes_views(tmp_path):
+    import duckdb
+    from transitiq_pipelines.silver import cli
+
+    assert cli.main(["--data-dir", str(tmp_path), "sample"]) == 0
+    conn = duckdb.connect(str(tmp_path / "warehouse" / "transitiq.duckdb"), read_only=True)
+    events = conn.execute("select count(*) from silver.subway_events").fetchone()[0]
+    stops_missing = conn.execute(
+        "select count(*) from silver.subway_events e anti join silver.gtfs_stops s using (stop_id)"
+    ).fetchone()[0]
+    assert events == 240 and stops_missing == 0  # sample is internally consistent for dbt tests
+    assert conn.execute("select count(*) from silver.alerts").fetchone()[0] == 2

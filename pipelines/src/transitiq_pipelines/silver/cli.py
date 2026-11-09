@@ -41,6 +41,13 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument(
         "--rebuild", action="store_true", help="drop the selected tables first (contract change)"
     )
+    pub = sub.add_parser("publish", help="expose silver tables as DuckDB views for dbt")
+    pub.add_argument(
+        "--db", type=Path, default=None, help="default: <data-dir>/warehouse/transitiq.duckdb"
+    )
+    sub.add_parser(
+        "sample", help="write synthetic bronze, build silver and publish (CI and public docs)"
+    )
     r = sub.add_parser("report", help="rows, quarantine rate and reasons per silver table")
     r.add_argument("--json", action="store_true")
     return p
@@ -116,6 +123,35 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     paths = Paths(args.data_dir).ensure()
+
+    if args.command == "publish":
+        from transitiq_pipelines.silver.publish import publish
+        from transitiq_pipelines.silver.warehouse import Warehouse
+
+        db = args.db or paths.data_dir / "warehouse" / "transitiq.duckdb"
+        counts = publish(Warehouse(paths.data_dir), db)
+        for name, n in counts.items():
+            print(f"silver.{name:<22} {n:>5} file(s)")
+        print(f"published to {db}")
+        return 0
+
+    if args.command == "sample":
+        from transitiq_pipelines.silver.builders import TABLE_GROUPS, SilverContext
+        from transitiq_pipelines.silver.publish import publish
+        from transitiq_pipelines.silver.sample import write_sample_bronze
+        from transitiq_pipelines.silver.warehouse import Warehouse
+        from transitiq_pipelines.storage import LocalBronzeStore
+
+        store = LocalBronzeStore(paths.bronze)
+        write_sample_bronze(store)
+        wh = Warehouse(paths.data_dir)
+        ctx = SilverContext(store=store, warehouse=wh, checkpoint_dir=paths.checkpoints)
+        failures = [s for group in TABLE_GROUPS.values() for s in group(ctx) if not s.ok]
+        for s in failures:
+            print(f"[FAIL] {s.table}: {s.failures}", file=sys.stderr)
+        publish(wh, paths.data_dir / "warehouse" / "transitiq.duckdb")
+        print(f"sample warehouse ready in {paths.data_dir} (synthetic data, not measurements)")
+        return 1 if failures else 0
 
     if args.command == "report":
         report = quality_report(paths)

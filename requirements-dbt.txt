@@ -1,0 +1,4 @@
+# dbt runs only in the pipelines Docker image (D-016): it pulls many compiled packages, and
+# Windows Smart App Control has already blocked one compiled dependency on the dev laptop.
+dbt-core==1.11.16
+dbt-duckdb==1.11.0
