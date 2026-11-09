@@ -42,7 +42,11 @@ services:
       retries: 20
 
   airflow:
-    image: apache/airflow:3.1.0-python3.12
+    # Airflow 3.1 + isolated TransitIQ virtualenv (airflow/Dockerfile, D-017)
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile
+    image: transitiq-airflow:local
     container_name: transitiq-airflow
     command: standalone
     user: "${AIRFLOW_UID:-50000}:0"
@@ -62,8 +66,18 @@ services:
       AWS_SECRET_ACCESS_KEY: test
       AWS_DEFAULT_REGION: us-east-1
       LOCALSTACK_ENDPOINT: http://localstack:4566
+      # DAG files import transitiq_pipelines.orchestration (stdlib only) from the mounted repo.
+      PYTHONPATH: /app/pipelines/src
+      AIRFLOW__CORE__DAGS_FOLDER: /app/pipelines/airflow/dags
+      TRANSITIQ_PG_URL: postgresql://${POSTGRES_USER:-transitiq}:${POSTGRES_PASSWORD:-transitiq_local_only}@postgres:5432/${POSTGRES_DB:-transitiq}
+    env_file:
+      - path: .env  # MBTA_API_KEY, NEON_DATABASE_URL (optional)
+        required: false
     volumes:
-      - ./pipelines/airflow/dags:/opt/airflow/dags
+      - .:/app
+      # Iceberg tables + DuckDB file live on a Docker volume, not the Windows-shared folder:
+      # heavy database IO across that boundary failed in dbt_build (D-020).
+      - warehouse:/app/data/warehouse
       - ./pipelines/airflow/logs:/opt/airflow/logs
       - ./pipelines/airflow/plugins:/opt/airflow/plugins
     healthcheck:
@@ -83,10 +97,19 @@ services:
       dockerfile: pipelines/Dockerfile
     image: transitiq-pipelines:local
     profiles: ["tools"]
+    # Same user as Airflow: both write to ./data, and files created by one must be writable
+    # by the other (the first Airflow run failed on root-owned warehouse folders; D-017).
+    user: "${AIRFLOW_UID:-50000}:0"
     working_dir: /app
     volumes:
       - .:/app
+      - warehouse:/app/data/warehouse  # same volume as Airflow (D-020)
+    env_file:
+      - path: .env
+        required: false
     environment:
+      HOME: /tmp  # uid 50000 has no home directory in this image
+      TRANSITIQ_PG_URL: postgresql://${POSTGRES_USER:-transitiq}:${POSTGRES_PASSWORD:-transitiq_local_only}@postgres:5432/${POSTGRES_DB:-transitiq}
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       AWS_DEFAULT_REGION: us-east-1
@@ -96,3 +119,4 @@ services:
 volumes:
   localstack-data:
   postgres-data:
+  warehouse:  # silver Iceberg tables + gold DuckDB file (rebuildable from ./data/bronze)

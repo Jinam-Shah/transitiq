@@ -17,6 +17,12 @@ Python package `transitiq_pipelines` (in `src/`), installed with `pip install -r
 | `silver/engine.py` | DuckDB validate-and-split engine with lineage columns |
 | `silver/builders.py` | Per-table rules and loaders (subway_events, alerts, weather_hourly, facilities, gtfs_*) |
 | `silver/warehouse.py` | PyIceberg SQLite catalog, partition overwrites, quarantine files |
+| `silver/publish.py` | Silver Iceberg tables -> DuckDB views for dbt (D-014) |
+| `silver/sample.py` | Synthetic sample warehouse for CI and public docs |
+| `gold/quality.py` | Cross-layer quality checks (D-019) |
+| `gold/publish_pg.py` | Atomic publish of compact gold tables to Postgres / Neon (D-018) |
+| `gold/cli.py` | `transitiq-gold quality / publish` |
+| `orchestration.py` | Daily pipeline steps (used by the Airflow DAG, tested without Airflow) |
 | `silver/cli.py` | `transitiq-silver build / report` (runs in the Docker `pipelines` service) |
 
-Airflow DAGs live in `airflow/dags/` (orchestration arrives in Phase 5).
+Airflow DAGs live in `airflow/dags/`: `transitiq_daily.py` builds tasks from `orchestration.py`. The Airflow image is `airflow/Dockerfile` (isolated task virtualenv, D-017).

@@ -20,6 +20,19 @@ jobs:
   lint-and-test:
     name: Lint and unit tests (Python)
     runs-on: ubuntu-latest
+    services:
+      postgres:  # real Postgres for the gold publish tests
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U test" --health-interval 5s --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_POSTGRES_URL: postgresql://test:test@localhost:5432/test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -71,6 +84,8 @@ jobs:
         run: |
           cp .env.example .env
           sed -i 's/^LOCALSTACK_AUTH_TOKEN=.*/LOCALSTACK_AUTH_TOKEN=placeholder/' .env
+          # containers run as AIRFLOW_UID; on Linux it must be the checkout owner to write to it
+          sed -i "s/^AIRFLOW_UID=.*/AIRFLOW_UID=$(id -u)/" .env
       - name: Build image
         run: docker compose build pipelines
       - name: Silver tests inside the container (same environment as local runs)
@@ -94,6 +109,31 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: site
+
+  airflow-dags:
+    name: Airflow image - DAG import check and task virtualenv
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create .env (compose requires LOCALSTACK_AUTH_TOKEN for every service)
+        run: |
+          cp .env.example .env
+          sed -i 's/^LOCALSTACK_AUTH_TOKEN=.*/LOCALSTACK_AUTH_TOKEN=placeholder/' .env
+          sed -i "s/^AIRFLOW_UID=.*/AIRFLOW_UID=$(id -u)/" .env
+      - name: Build Airflow image
+        run: docker compose build airflow
+      - name: DAGs import without errors
+        run: >
+          docker compose run --rm --no-deps --entrypoint python airflow -c
+          "from airflow.models.dagbag import DagBag;
+          b = DagBag(dag_folder='/app/pipelines/airflow/dags', include_examples=False);
+          assert not b.import_errors, b.import_errors;
+          d = b.dags['transitiq_daily']; assert len(d.tasks) == 11, len(d.tasks);
+          print('OK', sorted(b.dags))"
+      - name: Task virtualenv has the pipeline dependencies
+        run: >
+          docker compose run --rm --no-deps --entrypoint /opt/transitiq-venv/bin/python airflow -c
+          "import duckdb, pyiceberg, psycopg, pyarrow, dbt.version; print('venv OK')"
 
   deploy-docs:
     name: Publish dbt docs to GitHub Pages

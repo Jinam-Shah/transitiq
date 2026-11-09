@@ -2,7 +2,7 @@
 
 **Boston transit reliability, measured, not scheduled.** TransitIQ tells MBTA riders when the train *actually* comes, gives each rider a "leave by" time they can trust, and surfaces problems the official apps don't show: ghost trips, bus bunching, and elevator outages.
 
-> **Status:** Phase 4 (dbt gold star schema and reliability marts). Nothing is deployed to a hosted service yet.
+> **Status:** Phase 5 (Airflow daily pipeline, quality checks, gold published to Postgres/Neon).
 >
 > **dbt docs:** https://jinam-shah.github.io/transitiq/ (schema, lineage and tests; row counts there come from a small synthetic sample, not real data).
 
@@ -16,11 +16,12 @@ This table is kept honest as the project grows. "LocalStack" means an AWS emulat
 | Postgres (app DB + Airflow metadata) | Local Docker | Container starts (Phase 0) |
 | Airflow orchestration | Local Docker (`airflow standalone`) | Container starts (Phase 0) |
 | Historical backfill into bronze (`transitiq-ingest`) | Python on the laptop, writing to `data/bronze/` (durable). See D-009. | Built (Phase 2) |
-| Silver Iceberg tables (`transitiq-silver`) | `pipelines` Docker container on the laptop (Linux; D-012), writing to `data/warehouse/` | Built (Phase 3) |
+| Silver Iceberg tables (`transitiq-silver`) | `pipelines` / Airflow containers on the laptop (Linux; D-012), stored on the `warehouse` Docker volume (D-020) | Built (Phase 3) |
 | dbt gold star schema (`dbt build`) | `pipelines` Docker container, DuckDB file `data/warehouse/transitiq.duckdb` | Built (Phase 4) |
 | dbt docs | GitHub Pages, built in CI from synthetic sample data | Built (Phase 4) |
+| Daily orchestration | Airflow 3.1 in local Docker (`transitiq_daily` DAG) | Built (Phase 5) |
 | Model training | Local Docker (same image) | Planned |
-| Gold tables for the app | Neon PostgreSQL free tier | Planned |
+| Gold tables for the app | Local Docker Postgres always; **Neon free tier** when `NEON_DATABASE_URL` is set (`transitiq-gold publish`) | Built (Phase 5) |
 | Backend API | Render free tier | Planned |
 | Frontend | Vercel free tier | Planned |
 | Scheduled production jobs | GitHub Actions schedules | Planned |
@@ -128,6 +129,23 @@ docker compose run --rm pipelines dbt source freshness       # is silver up to d
 
 Metric definitions: [D-015](docs/DECISIONS.md). Ghost trips and model predictions arrive in Phases 6 and 7.
 
+## Daily pipeline (Phase 5, Airflow)
+
+The `transitiq_daily` DAG (10:17 UTC) runs: 6 parallel ingests -> `silver_build` -> `silver_publish` -> `dbt_build` -> `quality_checks` -> `publish_gold`. Every step is an idempotent CLI command, so re-running a task or the whole DAG is safe. Open Airflow at http://localhost:8080 (local only, no login).
+
+```powershell
+docker compose up -d --build airflow                        # first time, or after dependency changes
+# one time only, if ./data was created before Phase 5 (files were owned by root):
+docker compose run --rm --user root pipelines chown -R 50000:0 /app/data /app/dbt
+# one time only: prepare the warehouse volume (D-020) and rebuild silver into it from bronze
+docker compose run --rm --user root pipelines chown 50000:0 /app/data/warehouse
+docker compose run --rm pipelines transitiq-silver build --rebuild
+docker compose run --rm pipelines transitiq-gold quality    # the checks on their own
+docker compose run --rm pipelines transitiq-gold publish    # local Postgres (+ Neon if configured)
+```
+
+Quality checks (D-019): freshness, volume vs 28-day median, bronze/silver/gold reconciliation, quarantine rate, duplicates, null share, weather coverage. A failing check stops the run before publishing.
+
 ## AWS ingestion design (on LocalStack)
 
 EventBridge schedules trigger an **ingest** Lambda that writes raw files to the **bronze** bucket: live MBTA V3 alert snapshots every 30 minutes, the facility list daily, and a daily heartbeat. Each new bronze NDJSON file triggers a **validate** Lambda that writes valid rows (with lineage columns) to **silver** and rejected rows (with a reason) to **quarantine**. Failed async events go to an **SQS dead-letter queue**. Details and diagram: [infra/terraform/README.md](infra/terraform/README.md).
@@ -157,6 +175,8 @@ GitHub Actions runs Ruff, pytest (including moto-mocked Lambda tests), `terrafor
 - Silver is NDJSON until Phase 3 switches it to Parquet + Iceberg (D-006).
 - LocalStack's free plan has no persistence, so its bronze bucket is wiped on restart. Durable history lives in `data/bronze/` on the laptop (D-009).
 - `transitiq-silver` must run in Docker on Windows (PyIceberg path bug, D-012).
+- The DuckDB warehouse file allows one writer at a time: don't run `docker compose run pipelines ...` commands while the Airflow DAG is running.
+- Only compact gold tables are published to Postgres; detailed facts stay in DuckDB (D-018).
 - No public per-day bus history was found; bus reliability will come from our own GTFS-Realtime sampling (Phase 6).
 - Airflow runs in single-container `standalone` mode with login disabled. Local development only.
 

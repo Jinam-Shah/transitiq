@@ -56,6 +56,9 @@ def build_parser() -> argparse.ArgumentParser:
         sp = sub.add_parser(name, help=help_text)
         sp.add_argument("--start", type=_date, default=default_start)
         sp.add_argument("--end", type=_date, default=yesterday)
+        sp.add_argument(
+            "--days", type=int, default=None, help="last N days ending at --end (overrides --start)"
+        )
         return sp
 
     bf = ranged("backfill", "all historical sources for a date range (default: last 365 days)")
@@ -131,6 +134,8 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     paths = Paths(args.data_dir).ensure()
+    if getattr(args, "days", None):
+        args.start = args.end - timedelta(days=args.days - 1)
 
     if args.command == "report":
         from transitiq_pipelines.report import format_table, latest_runs, summarise

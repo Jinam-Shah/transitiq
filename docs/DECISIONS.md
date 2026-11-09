@@ -140,3 +140,32 @@ These are TransitIQ's definitions, not official MBTA metrics; all thresholds are
 - **Choice:** dbt-core 1.11.16 + dbt-duckdb 1.11.0 are installed only in the `pipelines` image (`requirements-dbt.txt`). Gold models are DuckDB tables in `data/warehouse/transitiq.duckdb`, schema `gold`, with **enforced dbt contracts** (every column's type is declared, and dbt fails if the SQL produces anything else). The CI job builds a small, internally consistent synthetic warehouse (`transitiq-silver sample`), runs `dbt build` on it, and publishes `dbt docs generate --static` to GitHub Pages.
 - **Reason:** dbt pulls many compiled packages and Windows Smart App Control has already blocked one compiled dependency, so Docker keeps local and CI identical. Real data never goes into Git or CI; the docs describe the schema, lineage and tests, and their row counts come from the synthetic sample (stated on the docs link in the README).
 - **Cost impact:** $0. GitHub Pages is free for public repositories.
+
+## D-017: Airflow runs pipeline steps in an isolated virtualenv (2026-11-09)
+
+- **Problem:** Airflow tasks need our package plus dbt, PyIceberg, DuckDB and psycopg. Installing those into Airflow's own Python risks dependency conflicts with Airflow's pinned constraints.
+- **Options:** (a) pip-install everything into the Airflow image, (b) DockerOperator launching the `pipelines` image (needs the Docker socket and host-path mounts, fragile on Windows), (c) a custom Airflow image with a separate virtualenv `/opt/transitiq-venv` and BashOperator tasks that call it.
+- **Choice:** (c). `airflow/Dockerfile` extends `apache/airflow:3.1.0-python3.12` with the virtualenv (`pipelines/requirements-runtime.txt`, pins checked against `pyproject.toml` by a test). The repo is mounted at `/app` and put on `PYTHONPATH` for task commands, so code changes need no rebuild. It must be `/app` in **every** container: the Iceberg SQLite catalog stores absolute metadata paths, and the first Airflow run failed in `silver_build` because the tables had been created under `/app` by the `pipelines` container while Airflow mounted the repo elsewhere. A test now asserts both services use the same mount. They must also run as the **same user** (`AIRFLOW_UID`, default 50000): the second attempt failed with `PermissionError` because the `pipelines` container had created the warehouse folders as root. Existing data needs a one-time `chown` (see README).
+- **Testability:** the DAG's steps live in `transitiq_pipelines/orchestration.py` (stdlib only). Unit tests check the dependency order and that every command parses with the real CLI parsers. CI builds the Airflow image and imports the DAGs with `DagBag`.
+- **Cost impact:** $0. About 1 GB more image.
+
+## D-018: Publish only compact gold tables to Postgres / Neon, atomically (2026-11-09)
+
+- **Problem:** The app needs gold data in PostgreSQL (Neon free tier: 1 GB storage per project, 100 CU-hours and 5 GB transfer per month, no card; checked on neon.com/pricing 2026-11-09). The full facts (13.7M segments, 13.6M headways) would not fit.
+- **Choice:** `transitiq-gold publish` copies a fixed list of tables: all dimensions, both reliability marts, facility outages, the last 180 days of alerts, the last 90 days of bunching events, and 30 days of quality results. Detailed facts stay in DuckDB. Each table is created as `gold.<t>__new`, filled with `COPY`, then swapped in with `DROP` + `RENAME` + primary key inside one transaction, so readers never see a partial table and re-runs are idempotent. Every table has a row limit checked before writing; the database size is checked after against an 800 MB budget. `--target auto` always publishes to the local Docker Postgres and also to Neon when `NEON_DATABASE_URL` is set.
+- **Reason:** Free-tier safety with headroom, and the app reads small, indexed tables.
+- **Cost impact:** $0.
+
+## D-019: Cross-layer quality checks after dbt (2026-11-09)
+
+- **Problem:** dbt tests validate each model, but not whether today's load is complete or whether layers agree.
+- **Choice:** `transitiq-gold quality` runs 8 checks with pass / warn / fail thresholds: freshness of the newest subway day, volume of the newest day versus the 28-day median, bronze-row = silver-row reconciliation per day, silver-to-gold ratio, quarantine rate, duplicate segments, share of segments without a scheduled time, and weather coverage. Results go to `ops.quality_results` (published to Postgres) and `data/quality/*.json`. Any fail stops the DAG before publishing.
+- **Cost impact:** $0.
+
+## D-020: Warehouse on a Docker volume, not the Windows-shared folder (2026-11-09)
+
+- **Problem:** The first full Airflow run failed in `dbt_build` with operating-system IO errors: DuckDB could not read a silver Parquet file written seconds earlier, and could not commit to `transitiq.duckdb`. The same models passed 76/76 in Phase 4. The warehouse lived in `C:\Projects\transitiq\data`, which Docker Desktop shares into Linux containers; heavy database IO across that boundary is slow, and Windows real-time scanning touches freshly written files (the same class of problem as the Phase 2 `WinError 5`).
+- **Options:** (a) retry and hope, (b) a Windows Defender exclusion for the folder (changes the laptop's security settings), (c) put the warehouse on a named Docker volume that both containers mount.
+- **Choice:** (c). `data/warehouse` (Iceberg tables, SQLite catalog, DuckDB file) is the `warehouse` volume, mounted at `/app/data/warehouse` in `airflow` and `pipelines`. Bronze, checkpoints, run logs and quarantine stay in the shared folder (small, sequential writes). The volume is filled by **rebuilding silver from bronze** (`transitiq-silver build --rebuild`), not by copying, which also proves that silver is reproducible from bronze. DuckDB also gets a memory cap (`TRANSITIQ_DUCKDB_MEMORY`, default 4GB) and `dbt_build` retries once.
+- **Trade-off:** the warehouse is no longer visible in Windows Explorer; inspect it through the containers.
+- **Cost impact:** $0.

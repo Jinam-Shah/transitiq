@@ -8,3 +8,6 @@ transitiq:
       threads: 4
       settings:
         TimeZone: UTC
+        # Leave room for Airflow, Postgres and LocalStack in Docker Desktop's memory.
+        memory_limit: "{{ env_var('TRANSITIQ_DUCKDB_MEMORY', '4GB') }}"
+        preserve_insertion_order: false

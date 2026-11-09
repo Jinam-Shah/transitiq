@@ -18,7 +18,7 @@ from transitiq_pipelines.silver import engine
 from transitiq_pipelines.silver.builders import (
     SUBWAY_SQL,
     _sql_literal,
-    weather_inputs,
+    weather_month_files,
 )
 from transitiq_pipelines.storage import LocalBronzeStore
 
@@ -173,17 +173,35 @@ def test_subway_types_and_lineage(tmp_path):
 
 
 # ---------- weather input selection ----------
-def test_weather_prefers_complete_month():
+def test_weather_month_files_ranked_best_first():
     metas = [
         {"key": "a", "month": "2026-10", "complete": False, "fetched_at": "2026-11-05"},
         {"key": "b", "month": "2026-10", "complete": True, "fetched_at": "2026-11-08"},
         {"key": "c", "month": "2026-11", "complete": False, "fetched_at": "2026-11-05"},
         {"key": "d", "month": "2026-11", "complete": False, "fetched_at": "2026-11-08"},
     ]
-    assert {m: v["key"] for m, v in weather_inputs(metas).items()} == {
-        "2026-10": "b",
-        "2026-11": "d",
+    files = weather_month_files(metas)
+    assert {m: [x["key"] for x in v] for m, v in files.items()} == {
+        "2026-10": ["b", "a"],
+        "2026-11": ["d", "c"],
     }
+
+
+def _wx(hours, temps):
+    from transitiq_pipelines.silver.builders import weather_table
+
+    return weather_table({"hourly": {"time": hours, "temperature_2m": temps}})
+
+
+def test_merge_month_keeps_every_hour_from_overlapping_partials():
+    """Regression: a newer 6-day partial must not drop the rest of the month."""
+    from transitiq_pipelines.silver.builders import merge_month
+
+    full = _wx(["2026-10-01T00:00", "2026-10-30T00:00", "2026-10-31T00:00"], [10.0, None, None])
+    later = _wx(["2026-10-30T00:00", "2026-10-31T00:00"], [7.0, 6.0])
+    newer_first, older = merge_month([later, full])
+    assert newer_first.column("temperature_2m_c").to_pylist() == [7.0, 6.0]
+    assert older.column("temperature_2m_c").to_pylist() == [10.0]  # Oct 1 kept, not lost
 
 
 # ---------- Iceberg end to end (Linux only) ----------

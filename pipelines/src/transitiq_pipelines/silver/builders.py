@@ -344,22 +344,45 @@ FROM (
 """
 
 
-def weather_inputs(metas: list[dict]) -> dict[str, dict]:
-    """One file per month: the complete file if present, else the newest partial."""
-    best: dict[str, dict] = {}
+def _weather_rank(meta: dict) -> tuple:
+    return (bool(meta.get("complete")), meta.get("fetched_at") or "", meta["key"])
+
+
+def weather_month_files(metas: list[dict]) -> dict[str, list[dict]]:
+    """All files per month, best first: the complete file, then newer partial fetches."""
+    months: dict[str, list[dict]] = defaultdict(list)
     for meta in metas:
-        month = meta.get("month")
-        if not month:
-            continue
-        rank = (bool(meta.get("complete")), meta.get("fetched_at") or "", meta["key"])
-        cur = best.get(month)
-        if cur is None or rank > (
-            bool(cur.get("complete")),
-            cur.get("fetched_at") or "",
-            cur["key"],
+        if meta.get("month"):
+            months[meta["month"]].append(meta)
+    return {
+        m: sorted(files, key=_weather_rank, reverse=True) for m, files in sorted(months.items())
+    }
+
+
+def merge_month(tables: list[pa.Table]) -> list[pa.Table]:
+    """Pick each hour from the best file that has a temperature for it (else the best file).
+
+    Partial fetches overlap: an early fetch covers the whole month with recent days still
+    empty, a later one may cover only the last days. Taking whole files would lose hours
+    (a real bug: a 6-day partial once replaced a full-month partial). Returns one filtered
+    table per input file so every row keeps its own bronze file as lineage.
+    """
+    chosen: dict = {}
+    for i, table in enumerate(tables):
+        for ts, temp in zip(
+            table.column("hour_ts").to_pylist(),
+            table.column("temperature_2m_c").to_pylist(),
+            strict=True,
         ):
-            best[month] = meta
-    return dict(sorted(best.items()))
+            if ts is None:
+                continue
+            if ts not in chosen or (chosen[ts][1] is None and temp is not None):
+                chosen[ts] = (i, temp)
+    out = []
+    for i, table in enumerate(tables):
+        keep = [chosen.get(ts, (None,))[0] == i for ts in table.column("hour_ts").to_pylist()]
+        out.append(table.filter(pa.array(keep)))
+    return out
 
 
 def weather_table(payload: dict) -> pa.Table:
@@ -378,8 +401,8 @@ def build_weather_hourly(ctx: SilverContext) -> TableStats:
     name, contract = "weather_hourly", C.WEATHER_HOURLY
     stats, t0 = TableStats(name), time.monotonic()
     ckpt = ctx.checkpoint(name)
-    inputs = weather_inputs(bronze_metas(ctx.store, "open_meteo_hourly"))
-    signature = "|".join(m["key"] for m in inputs.values())
+    inputs = weather_month_files(bronze_metas(ctx.store, "open_meteo_hourly"))
+    signature = "|".join(m["key"] for files in inputs.values() for m in files)
     if not inputs:
         stats.failures.append({"partition": "all", "error": "no open_meteo_hourly bronze files"})
     elif _unchanged(ctx, ckpt, "all", signature):
@@ -388,19 +411,24 @@ def build_weather_hourly(ctx: SilverContext) -> TableStats:
         conn = connect()
         results = []
         try:
-            for meta in inputs.values():
-                payload = json.loads(ctx.store.path(meta["key"]).read_text("utf-8"))
-                wx = weather_table(payload)  # noqa: F841 (referenced by name in SQL)
-                conn.register("wx", wx)
-                results.append(split(conn, WEATHER_SQL, contract, meta["key"], None, ctx.now))
-                conn.unregister("wx")
+            for files in inputs.values():
+                tables = [
+                    weather_table(json.loads(ctx.store.path(m["key"]).read_text("utf-8")))
+                    for m in files
+                ]
+                for meta, wx in zip(files, merge_month(tables), strict=True):
+                    if wx.num_rows == 0:
+                        continue
+                    conn.register("wx", wx)
+                    results.append(split(conn, WEATHER_SQL, contract, meta["key"], None, ctx.now))
+                    conn.unregister("wx")
             merged = concat(results, contract)
             ctx.warehouse.replace_all(name, contract, merged.valid)
             ctx.warehouse.clear_quarantine(name)
             ctx.warehouse.write_quarantine(name, "all", merged.rejected)
             _mark(ckpt, "all", signature, merged)
             stats.add(merged)
-            stats.partitions_loaded += len(results)
+            stats.partitions_loaded += len(inputs)
         except Exception as exc:
             stats.failures.append({"partition": "all", "error": str(exc)[:500]})
     stats.duration_seconds = round(time.monotonic() - t0, 2)
