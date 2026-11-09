@@ -93,3 +93,23 @@ Each entry: problem, options, choice, reason, cost impact.
   - Weather months are only marked complete once they ended at least 7 days ago (archive lag); before that they are stored as dated `_partial_` files.
 - **Reason:** Replays are cheap and safe, and silver (Phase 3) can always pick the newest version per partition while bronze keeps the full history of what upstream published.
 - **Cost impact:** Slightly more disk when upstream republishes. LAMP republished all historical days on 2026-10-22, so expect occasional full re-downloads of the range you keep.
+
+## D-012: Run silver (Iceberg) jobs in a Linux Docker container (2026-11-09)
+
+- **Problem:** PyIceberg cannot handle Windows drive-letter paths: `urlparse` reads `C:` as a URI scheme, so local file IO fails ([apache/iceberg-python#3720](https://github.com/apache/iceberg-python/issues/3720), open when checked on 2026-11-09). The development laptop runs Windows.
+- **Options:** (a) patch PyIceberg path handling ourselves, (b) WSL, (c) a small `pipelines` Docker image (python:3.12-slim) run with `docker compose run`, (d) store the warehouse in LocalStack S3 (lost on restart, D-009).
+- **Choice:** (c). `docker compose run --rm pipelines transitiq-silver build`. The repo is mounted into the container, so code edits apply without rebuilding. The CLI refuses to run on Windows with a message showing the Docker command. Iceberg tests are skipped on Windows and run in CI and in the container.
+- **Reason:** Matches the spec ("Iceberg, dbt, training run in local Docker"), is identical locally and in CI, and avoids carrying a patch to a third-party library. dbt (Phase 4) and training (Phase 7) will reuse the same image.
+- **Cost impact:** $0. About 1 GB of disk for the image.
+
+## D-013: Silver design: DuckDB rules, Iceberg tables, quarantine files (2026-11-09)
+
+- **Problem:** Turn raw bronze into typed, validated, deduplicated tables that can always be rebuilt from bronze, with rejected rows kept and counted.
+- **Choice:**
+  - **Contracts in code** (`silver/contracts.py`): one Arrow schema per silver table (the source of truth) and a bronze contract per upstream file. Bronze type changes (e.g. an integer column arriving as text) fail that partition as `schema drift` and keep the previous good data.
+  - **Rules as SQL** run by DuckDB: each table's query returns the contract columns plus `_reason`, which is NULL for valid rows. One shared engine splits valid and rejected rows and adds lineage (`_source_file`, `_source_sha256`, `_loaded_at`).
+  - **Iceberg via PyIceberg** with a SQLite catalog in `data/warehouse/`. `subway_events` is partitioned by `service_date` and loaded one month per commit, overwriting exactly the days being loaded. Other tables are replaced whole when their input changes.
+  - **Quarantine** as Parquet in `data/quarantine/<table>/<partition>.parquet` with `_reason` and `_row_number`, so every rejected row can be traced to its bronze file and line.
+  - **Checkpoints** per table record the bronze version and counts per partition; re-runs skip unchanged inputs; `--force` replays; `--rebuild` drops and recreates after a deliberate contract change.
+- **Things real data taught us (fixed and covered by tests):** DuckDB auto-detects `name=value` folders as Hive partitions and silently replaced LAMP's integer `service_date` with the folder's text value, so all reads set `hive_partitioning = false`. DuckDB's CSV sniffer mis-read a quoted GTFS headsign containing commas, so the CSV dialect is explicit. About 22% of LAMP alert rows legitimately have no active-period start, so that is not a rejection rule.
+- **Cost impact:** $0. Everything runs locally.

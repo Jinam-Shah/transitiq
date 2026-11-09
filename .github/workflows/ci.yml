@@ -32,7 +32,7 @@ jobs:
         run: ruff check .
       - name: Ruff format check
         run: ruff format --check .
-      - name: Pytest (includes moto-mocked Lambda tests)
+      - name: Pytest (moto-mocked Lambdas, silver/Iceberg tests on Linux)
         run: pytest
 
   terraform-validate:
@@ -61,6 +61,16 @@ jobs:
           # Placeholder so the required-variable check passes; this job never starts containers.
           sed -i 's/^LOCALSTACK_AUTH_TOKEN=.*/LOCALSTACK_AUTH_TOKEN=placeholder/' .env
           docker compose config --quiet
+
+  pipelines-image:
+    name: Build pipelines Docker image and run silver tests in it
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker compose build pipelines
+      - name: Silver tests inside the container (same environment as local runs)
+        run: docker compose run --rm pipelines pytest tests/silver -p no:cacheprovider
 
   localstack-e2e:
     name: Deploy to LocalStack and run end-to-end check
