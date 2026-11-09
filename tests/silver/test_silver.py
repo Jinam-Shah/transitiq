@@ -395,3 +395,48 @@ def test_rules_do_not_import_pyiceberg():
         "sys.exit(1 if bad else 0)"
     )
     assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0
+
+
+def test_alert_rules(tmp_path):
+    from transitiq_pipelines.silver.builders import ALERTS_SQL
+
+    def alert(i, **over):
+        row = {name: None for name in C.BRONZE_LAMP_ALERTS}
+        row.update(
+            {
+                "id": i,
+                "effect": "OTHER_EFFECT",
+                "effect_detail": "ELEVATOR_CLOSURE",
+                "severity": 1,
+                "created_timestamp": DAY_TS,
+                "last_modified_timestamp": DAY_TS,
+                "active_period.start_timestamp": DAY_TS,
+                "active_period.end_timestamp": DAY_TS + 3600,
+                "informed_entity.facility_id": "802",
+            }
+        )
+        row.update(over)
+        return row
+
+    rows = [
+        alert(1),
+        alert(1),  # exact duplicate version
+        alert(2, **{"active_period.start_timestamp": None, "active_period.end_timestamp": None}),
+        alert(3, **{"active_period.end_timestamp": DAY_TS - 60}),
+        alert(4, effect=None),
+    ]
+    types = {
+        n: (pa.int64() if f == C.INTEGER else pa.string()) for n, f in C.BRONZE_LAMP_ALERTS.items()
+    }
+    table = pa.table({n: pa.array([r[n] for r in rows], types[n]) for n in types})
+    folder = tmp_path / "snapshot_date=2026-11-09"
+    folder.mkdir()
+    pq.write_table(table, folder / "a.parquet")
+    sql = ALERTS_SQL.format(path=_sql_literal(folder / "a.parquet"))
+    result = engine.split(engine.connect(), sql, C.ALERTS, "key", "sha", NOW)
+    assert sorted(result.valid.column("alert_id").to_pylist()) == [1, 2]  # null start is kept
+    assert dict(result.reasons) == {
+        "duplicate_row": 1,
+        "end_before_start": 1,
+        "missing_field:effect": 1,
+    }

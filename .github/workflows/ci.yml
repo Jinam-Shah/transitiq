@@ -67,6 +67,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Create .env (compose requires LOCALSTACK_AUTH_TOKEN for every service)
+        run: |
+          cp .env.example .env
+          sed -i 's/^LOCALSTACK_AUTH_TOKEN=.*/LOCALSTACK_AUTH_TOKEN=placeholder/' .env
       - name: Build image
         run: docker compose build pipelines
       - name: Silver tests inside the container (same environment as local runs)

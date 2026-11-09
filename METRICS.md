@@ -32,9 +32,24 @@ Command: `python scripts/e2e_localstack.py` after `terraform -chdir=infra/terraf
 | 2026-11-06 | Live MBTA V3 alerts via Lambda | 186 alerts in 0.42 s | LS | Lambda called api-v3.mbta.com with an API key |
 | 2026-11-06 | Quarantine rate on the test fixture | 0.5714 (4 of 7) | LS | **Designed test data, not a real-data quality metric.** Real quarantine rates are measured in Phase 3 |
 
+## Silver layer (Phase 3)
+
+Command: `docker compose run --rm pipelines transitiq-silver build`, then `transitiq-silver report`. Env `LOCAL-DOCKER` = the `pipelines` container (python:3.12-slim) in Docker Desktop on Jinam's laptop. Input: the Phase 2 bronze backfill (2025-11-01 to 2026-10-31).
+
+| Date | Table | Rows in | Valid (Iceberg) | Quarantined | Rate | Top reasons | Run time (s) | Env |
+|---|---|---|---|---|---|---|---|---|
+| 2026-11-09 | `subway_events` (364 daily partitions) | 14,529,395 | 14,515,547 | 13,848 | 0.095% | duplicate_event 13,704 · implausible_travel_time 81 · implausible_dwell_time 63 | 123.51 | LOCAL-DOCKER |
+| 2026-11-09 | `weather_hourly` (12 months) | 8,760 | 8,760 | 0 | 0% | | 1.48 | LOCAL-DOCKER |
+| 2026-11-09 | `facilities` | 420 | 420 | 0 | 0% | | 0.39 | LOCAL-DOCKER |
+| 2026-11-09 | `gtfs_routes` / `stops` / `trips` | 404 / 10,291 / 112,117 | same | 0 | 0% | | 2.95 / 0.36 / 1.91 | LOCAL-DOCKER |
+| 2026-11-09 | `gtfs_stop_times` | 2,858,761 | 2,858,761 | 0 | 0% | | 21.0 | LOCAL-DOCKER |
+| 2026-11-09 | `gtfs_calendar` / `calendar_dates` | 146 / 133 | same | 0 | 0% | | 0.18 / 0.16 | LOCAL-DOCKER |
+| 2026-11-09 | `alerts` | — | — | — | — | Failed on an intermittent DuckDB INTERNAL error; fixed (D-013); to be re-run | — | LOCAL-DOCKER |
+
+Tests: 110 passed inside the container (`docker compose run --rm pipelines pytest`, 2026-11-09).
+
 ## Sections to fill as phases complete
 
-- Data quality: real quarantine rate and number of checks on silver (Phase 3)
 - dbt: model and test counts (Phase 4)
 - Pipeline run time per day, end to end (Phase 5)
 - Real time: ghost-trip rate, bunching findings, sampling coverage (Phase 6)

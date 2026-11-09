@@ -252,15 +252,18 @@ WITH src AS (
         "informed_entity.facility_id" AS facility_id,
         "informed_entity.activities" AS activities,
         _row_number,
-        hash(id, last_modified_timestamp, "active_period.start_timestamp",
-             "active_period.end_timestamp", "informed_entity.route_id",
-             "informed_entity.route_type", "informed_entity.direction_id",
-             "informed_entity.stop_id", "informed_entity.facility_id",
-             "informed_entity.activities") AS _row_hash
+        -- raw keys for duplicate detection (no hash(): a UBIGINT hash column triggered an
+        -- intermittent DuckDB INTERNAL cast error on the 5.2M-row file in Docker)
+        id AS _k_id, last_modified_timestamp AS _k_mod,
+        "active_period.start_timestamp" AS _k_start, "active_period.end_timestamp" AS _k_end
     FROM src
 ), flagged AS (
     SELECT *,
-        row_number() OVER (PARTITION BY _row_hash ORDER BY _row_number) AS _dup,
+        row_number() OVER (
+            PARTITION BY _k_id, _k_mod, _k_start, _k_end, route_id, route_type, direction_id,
+                stop_id, facility_id, activities
+            ORDER BY _row_number
+        ) AS _dup,
         CASE
             WHEN alert_id IS NULL THEN 'missing_field:alert_id'
             WHEN coalesce(effect, '') = '' THEN 'missing_field:effect'
@@ -270,7 +273,7 @@ WITH src AS (
         END AS _rule
     FROM typed
 )
-SELECT * EXCLUDE (_row_hash, _dup, _rule),
+SELECT * EXCLUDE (_k_id, _k_mod, _k_start, _k_end, _dup, _rule),
     coalesce(_rule, CASE WHEN _dup > 1 THEN 'duplicate_row' END) AS _reason
 FROM flagged
 """
