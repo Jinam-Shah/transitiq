@@ -49,10 +49,20 @@ Command: `docker compose run --rm pipelines transitiq-silver build`, then `trans
 
 Tests: 111 passed inside the container (`docker compose run --rm pipelines pytest`, 2026-11-09). First alerts run failed on an intermittent DuckDB INTERNAL error; fixed in D-013 and re-run above.
 
+## Gold layer (Phase 4)
+
+| Date | Metric | Value | Env | Command |
+|---|---|---|---|---|
+| 2026-11-09 | dbt project size | 18 models (12 gold tables, 6 staging views), 57 data tests, 1 seed, 10 sources | LOCAL-DOCKER | `dbt build` output |
+| 2026-11-09 | `dbt build` on the full year (2025-11-01 to 2026-10-31) | PASS=76, WARN=0, ERROR=0 in 161.59 s | LOCAL-DOCKER | `docker compose run --rm pipelines dbt build` |
+| 2026-11-09 | Slowest models | fact_headway 73.97 s, mart_stop_reliability 75.48 s, fact_travel_time 53.72 s | LOCAL-DOCKER | same run |
+| 2026-11-09 | Source freshness (silver.subway_events) | PASS | LOCAL-DOCKER | `docker compose run --rm pipelines dbt source freshness` |
+| 2026-11-09 | dbt docs published | https://jinam-shah.github.io/transitiq/ (built from synthetic sample data) | CI | GitHub Actions `deploy-docs` |
+
 ## Sections to fill as phases complete
 
 - dbt: model and test counts (Phase 4)
-- Pipeline run time per day, end to end (Phase 5)
+- Pipeline run time per day, end to end; gold rows published and Postgres size (Phase 5)
 - Real time: ghost-trip rate, bunching findings, sampling coverage (Phase 6)
 - ML: calibration per quantile, pinball loss vs schedule baseline (Phase 7)
 - API: p95 latency, test counts (Phase 8, 12)

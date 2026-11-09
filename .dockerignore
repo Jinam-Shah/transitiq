@@ -7,3 +7,4 @@ infra/terraform/.terraform
 infra/terraform/build
 web/node_modules
 .env
+pipelines/airflow/logs

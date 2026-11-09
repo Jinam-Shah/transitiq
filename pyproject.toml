@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "transitiq"
-version = "0.3.0"
+version = "0.5.0"
 description = "Boston transit reliability platform built on MBTA data"
 requires-python = ">=3.12"
 dependencies = [
@@ -13,11 +13,13 @@ dependencies = [
   "duckdb==1.5.6",  # silver validation SQL
   "pyiceberg[sql-sqlite,pyarrow]==0.12.0",  # Iceberg tables with a SQLite catalog
   "tzdata==2026.5",  # IANA time zones; Windows Python ships without them (pyarrow needs "UTC")
+  "psycopg[binary]==3.3.6",  # publish gold tables to PostgreSQL / Neon
 ]
 
 [project.scripts]
 transitiq-ingest = "transitiq_pipelines.cli:main"
 transitiq-silver = "transitiq_pipelines.silver.cli:main"
+transitiq-gold = "transitiq_pipelines.gold.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["pipelines/src"]

@@ -2,7 +2,8 @@
 
 https://archive-api.open-meteo.com/v1/archive  (Historical Weather API)
 
-Fetched one calendar month per request (a year = 12 calls; the free limit is 10,000/day).
+Fetched one whole calendar month per request (a year = 12 calls; the free limit is
+10,000/day). Ranges are widened to whole months.
 Times are requested in UTC (timezone=GMT) to avoid daylight-saving ambiguity.
 
 The archive lags real time by several days, so a month is only "complete" once it ended at
@@ -58,6 +59,9 @@ def run(ctx: Context, start: date, end: date, url: str = ARCHIVE_URL) -> RunStat
     ckpt = ctx.checkpoint(SOURCE)
     latest_available = ctx.today - timedelta(days=2)
     end = min(end, latest_available)
+    # Always fetch whole calendar months: a window like "last 14 days" would otherwise store a
+    # mid-month slice, and a month could never get its "complete" file.
+    start = start.replace(day=1)
     for month, c_start, c_end, month_end in month_chunks(start, end):
         complete = c_start.day == 1 and c_end == month_end
         complete = complete and month_end <= ctx.today - timedelta(days=ARCHIVE_LAG_DAYS)
