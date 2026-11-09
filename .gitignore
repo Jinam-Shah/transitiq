@@ -17,6 +17,7 @@ htmlcov/
 # Data (bronze/silver/gold files are rebuilt, never committed)
 data/*
 !data/.gitkeep
+data_sample/
 
 # Airflow runtime
 pipelines/airflow/logs/*

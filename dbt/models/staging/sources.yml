@@ -1,0 +1,353 @@
+version: 2
+
+# GENERATED from pipelines/src/transitiq_pipelines/silver/contracts.py.
+# tests/test_dbt_contracts.py fails if this file and the silver contracts disagree.
+
+sources:
+  - name: silver
+    schema: silver
+    description: Validated Iceberg tables exposed as DuckDB views by `transitiq-silver publish`.
+    tables:
+      - name: subway_events
+        description: "One arrival/departure event per trip and stop (MBTA LAMP subway on-time performance), partitioned by service_date."
+        config:
+          loaded_at_field: _loaded_at
+          freshness:
+            warn_after: {count: 2, period: day}
+            error_after: {count: 14, period: day}
+        columns:
+          - name: service_date
+            data_type: date
+          - name: route_id
+            data_type: varchar
+          - name: trunk_route_id
+            data_type: varchar
+          - name: branch_route_id
+            data_type: varchar
+          - name: direction_id
+            data_type: integer
+          - name: direction
+            data_type: varchar
+          - name: direction_destination
+            data_type: varchar
+          - name: trip_id
+            data_type: varchar
+          - name: vehicle_id
+            data_type: varchar
+          - name: vehicle_label
+            data_type: varchar
+          - name: stop_id
+            data_type: varchar
+          - name: parent_station
+            data_type: varchar
+          - name: stop_sequence
+            data_type: integer
+          - name: stop_count
+            data_type: integer
+          - name: move_ts
+            data_type: timestamptz
+          - name: stop_ts
+            data_type: timestamptz
+          - name: travel_time_seconds
+            data_type: bigint
+          - name: dwell_time_seconds
+            data_type: bigint
+          - name: headway_trunk_seconds
+            data_type: bigint
+          - name: headway_branch_seconds
+            data_type: bigint
+          - name: start_time
+            data_type: bigint
+          - name: scheduled_arrival_time
+            data_type: bigint
+          - name: scheduled_departure_time
+            data_type: bigint
+          - name: scheduled_travel_time
+            data_type: bigint
+          - name: scheduled_headway_trunk
+            data_type: bigint
+          - name: scheduled_headway_branch
+            data_type: bigint
+          - name: _source_file
+            data_type: varchar
+          - name: _source_sha256
+            data_type: varchar
+          - name: _loaded_at
+            data_type: timestamptz
+      - name: alerts
+        description: "One row per alert version and informed entity (MBTA LAMP alerts history since 2018)."
+        columns:
+          - name: alert_id
+            data_type: bigint
+          - name: cause
+            data_type: varchar
+          - name: cause_detail
+            data_type: varchar
+          - name: effect
+            data_type: varchar
+          - name: effect_detail
+            data_type: varchar
+          - name: severity_level
+            data_type: varchar
+          - name: severity
+            data_type: integer
+          - name: alert_lifecycle
+            data_type: varchar
+          - name: duration_certainty
+            data_type: varchar
+          - name: header_text
+            data_type: varchar
+          - name: created_ts
+            data_type: timestamptz
+          - name: last_modified_ts
+            data_type: timestamptz
+          - name: closed_ts
+            data_type: timestamptz
+          - name: active_start_ts
+            data_type: timestamptz
+          - name: active_end_ts
+            data_type: timestamptz
+          - name: route_id
+            data_type: varchar
+          - name: route_type
+            data_type: integer
+          - name: direction_id
+            data_type: integer
+          - name: stop_id
+            data_type: varchar
+          - name: facility_id
+            data_type: varchar
+          - name: activities
+            data_type: varchar
+          - name: _source_file
+            data_type: varchar
+          - name: _source_sha256
+            data_type: varchar
+          - name: _loaded_at
+            data_type: timestamptz
+      - name: weather_hourly
+        description: "Hourly weather for downtown Boston in UTC (Open-Meteo, CC BY 4.0)."
+        columns:
+          - name: hour_ts
+            data_type: timestamptz
+          - name: temperature_2m_c
+            data_type: double
+          - name: relative_humidity_2m_pct
+            data_type: double
+          - name: precipitation_mm
+            data_type: double
+          - name: rain_mm
+            data_type: double
+          - name: snowfall_cm
+            data_type: double
+          - name: snow_depth_m
+            data_type: double
+          - name: weather_code
+            data_type: integer
+          - name: wind_speed_10m_kmh
+            data_type: double
+          - name: wind_gusts_10m_kmh
+            data_type: double
+          - name: _source_file
+            data_type: varchar
+          - name: _source_sha256
+            data_type: varchar
+          - name: _loaded_at
+            data_type: timestamptz
+      - name: facilities
+        description: "Elevators and escalators (MBTA V3 API snapshot)."
+        columns:
+          - name: facility_id
+            data_type: varchar
+          - name: facility_type
+            data_type: varchar
+          - name: long_name
+            data_type: varchar
+          - name: short_name
+            data_type: varchar
+          - name: stop_id
+            data_type: varchar
+          - name: latitude
+            data_type: double
+          - name: longitude
+            data_type: double
+          - name: _source_file
+            data_type: varchar
+          - name: _source_sha256
+            data_type: varchar
+          - name: _loaded_at
+            data_type: timestamptz
+      - name: gtfs_routes
+        description: "GTFS routes (current MBTA feed)."
+        columns:
+          - name: route_id
+            data_type: varchar
+          - name: agency_id
+            data_type: varchar
+          - name: route_short_name
+            data_type: varchar
+          - name: route_long_name
+            data_type: varchar
+          - name: route_desc
+            data_type: varchar
+          - name: route_type
+            data_type: integer
+          - name: route_color
+            data_type: varchar
+          - name: route_text_color
+            data_type: varchar
+          - name: route_sort_order
+            data_type: integer
+          - name: line_id
+            data_type: varchar
+          - name: feed_version
+            data_type: varchar
+          - name: _source_file
+            data_type: varchar
+          - name: _source_sha256
+            data_type: varchar
+          - name: _loaded_at
+            data_type: timestamptz
+      - name: gtfs_stops
+        description: "GTFS stops, platforms and stations."
+        columns:
+          - name: stop_id
+            data_type: varchar
+          - name: stop_name
+            data_type: varchar
+          - name: platform_code
+            data_type: varchar
+          - name: platform_name
+            data_type: varchar
+          - name: stop_lat
+            data_type: double
+          - name: stop_lon
+            data_type: double
+          - name: location_type
+            data_type: integer
+          - name: parent_station
+            data_type: varchar
+          - name: wheelchair_boarding
+            data_type: integer
+          - name: municipality
+            data_type: varchar
+          - name: vehicle_type
+            data_type: integer
+          - name: feed_version
+            data_type: varchar
+          - name: _source_file
+            data_type: varchar
+          - name: _source_sha256
+            data_type: varchar
+          - name: _loaded_at
+            data_type: timestamptz
+      - name: gtfs_trips
+        description: "GTFS scheduled trips."
+        columns:
+          - name: trip_id
+            data_type: varchar
+          - name: route_id
+            data_type: varchar
+          - name: service_id
+            data_type: varchar
+          - name: trip_headsign
+            data_type: varchar
+          - name: trip_short_name
+            data_type: varchar
+          - name: direction_id
+            data_type: integer
+          - name: block_id
+            data_type: varchar
+          - name: shape_id
+            data_type: varchar
+          - name: wheelchair_accessible
+            data_type: integer
+          - name: route_pattern_id
+            data_type: varchar
+          - name: feed_version
+            data_type: varchar
+          - name: _source_file
+            data_type: varchar
+          - name: _source_sha256
+            data_type: varchar
+          - name: _loaded_at
+            data_type: timestamptz
+      - name: gtfs_stop_times
+        description: "GTFS scheduled stop times."
+        columns:
+          - name: trip_id
+            data_type: varchar
+          - name: stop_sequence
+            data_type: integer
+          - name: stop_id
+            data_type: varchar
+          - name: arrival_time
+            data_type: varchar
+          - name: departure_time
+            data_type: varchar
+          - name: arrival_seconds
+            data_type: integer
+          - name: departure_seconds
+            data_type: integer
+          - name: pickup_type
+            data_type: integer
+          - name: drop_off_type
+            data_type: integer
+          - name: timepoint
+            data_type: integer
+          - name: feed_version
+            data_type: varchar
+          - name: _source_file
+            data_type: varchar
+          - name: _source_sha256
+            data_type: varchar
+          - name: _loaded_at
+            data_type: timestamptz
+      - name: gtfs_calendar
+        description: "GTFS weekly service calendars."
+        columns:
+          - name: service_id
+            data_type: varchar
+          - name: monday
+            data_type: integer
+          - name: tuesday
+            data_type: integer
+          - name: wednesday
+            data_type: integer
+          - name: thursday
+            data_type: integer
+          - name: friday
+            data_type: integer
+          - name: saturday
+            data_type: integer
+          - name: sunday
+            data_type: integer
+          - name: start_date
+            data_type: date
+          - name: end_date
+            data_type: date
+          - name: feed_version
+            data_type: varchar
+          - name: _source_file
+            data_type: varchar
+          - name: _source_sha256
+            data_type: varchar
+          - name: _loaded_at
+            data_type: timestamptz
+      - name: gtfs_calendar_dates
+        description: "GTFS service exceptions."
+        columns:
+          - name: service_id
+            data_type: varchar
+          - name: date
+            data_type: date
+          - name: exception_type
+            data_type: integer
+          - name: feed_version
+            data_type: varchar
+          - name: _source_file
+            data_type: varchar
+          - name: _source_sha256
+            data_type: varchar
+          - name: _loaded_at
+            data_type: timestamptz

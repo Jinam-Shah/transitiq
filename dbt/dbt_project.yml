@@ -1,0 +1,39 @@
+name: transitiq
+version: "0.4.0"
+config-version: 2
+profile: transitiq
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target", "logs"]
+
+models:
+  transitiq:
+    staging:
+      +schema: staging
+      +materialized: view
+    marts:
+      +schema: gold
+      +materialized: table
+      +contract:
+        enforced: true
+
+seeds:
+  transitiq:
+    +schema: reference
+    holidays:
+      +column_types:
+        holiday_date: date
+        holiday_name: varchar
+        holiday_type: varchar
+
+vars:
+  # Definitions used across models (documented in docs/DECISIONS.md D-015).
+  on_time_tolerance_seconds: 60      # a segment is on time if actual <= scheduled + this
+  bunching_headway_ratio: 0.25       # bunch: headway <= 25% of scheduled headway
+  long_gap_headway_ratio: 1.5        # gap before a bunch counts as "long" at >= 150% of scheduled
+  reliable_headway_ratio: 1.5        # a headway is reliable if <= 150% of scheduled
+  local_timezone: "America/New_York"

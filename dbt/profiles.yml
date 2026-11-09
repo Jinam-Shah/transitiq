@@ -1,0 +1,10 @@
+# No secrets here: the DuckDB file is local. Path is relative to the repo root (/app in Docker).
+transitiq:
+  target: local
+  outputs:
+    local:
+      type: duckdb
+      path: "{{ env_var('TRANSITIQ_DUCKDB', 'data/warehouse/transitiq.duckdb') }}"
+      threads: 4
+      settings:
+        TimeZone: UTC
