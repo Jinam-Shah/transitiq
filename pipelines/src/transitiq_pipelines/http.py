@@ -10,7 +10,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import random
 import time
 import urllib.error
@@ -21,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from transitiq_pipelines.config import USER_AGENT
+from transitiq_pipelines.fsutil import atomic_replace
 
 log = logging.getLogger(__name__)
 
@@ -166,5 +166,5 @@ class HttpClient:
         except BaseException:
             part.unlink(missing_ok=True)
             raise
-        os.replace(part, dest)
+        atomic_replace(part, dest)
         return result

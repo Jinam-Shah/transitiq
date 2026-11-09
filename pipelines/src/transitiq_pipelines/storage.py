@@ -17,6 +17,8 @@ import shutil
 from pathlib import Path
 from typing import Protocol
 
+from transitiq_pipelines.fsutil import atomic_replace
+
 KEY_PATTERN = re.compile(r"^[A-Za-z0-9=._\-]+(/[A-Za-z0-9=._\-]+)*$")
 META_SUFFIX = ".meta.json"
 
@@ -55,7 +57,7 @@ class LocalBronzeStore:
         meta = self.path(key + META_SUFFIX)
         tmp = meta.with_name(meta.name + ".tmp")
         tmp.write_text(json.dumps({"key": key, **metadata}, indent=2, sort_keys=True), "utf-8")
-        os.replace(tmp, meta)
+        atomic_replace(tmp, meta)
 
     def put_file(self, key: str, src: Path, metadata: dict) -> str:
         dest = self.path(key)
@@ -65,7 +67,7 @@ class LocalBronzeStore:
         tmp = dest.with_name(dest.name + ".tmp")
         shutil.copyfile(src, tmp)
         self._write_meta(key, metadata)
-        os.replace(tmp, dest)  # data last: a key is only "present" once fully written
+        atomic_replace(tmp, dest)  # data last: a key is only "present" once fully written
         return self.uri(key)
 
     def put_bytes(self, key: str, data: bytes, metadata: dict) -> str:
@@ -76,7 +78,7 @@ class LocalBronzeStore:
         tmp = dest.with_name(dest.name + ".tmp")
         tmp.write_bytes(data)
         self._write_meta(key, metadata)
-        os.replace(tmp, dest)
+        atomic_replace(tmp, dest)
         return self.uri(key)
 
     def read_meta(self, key: str) -> dict:
