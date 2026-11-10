@@ -675,10 +675,131 @@ def build_gtfs(ctx: SilverContext) -> list[TableStats]:
     return out
 
 
+# ---------- GTFS-Realtime (collector bronze, partitioned by feed_date) ----------
+RT_VP_SQL = """
+WITH src AS (
+    SELECT *, row_number() OVER () AS _row_number
+    FROM read_parquet([{paths}], hive_partitioning = false, union_by_name = true)
+), typed AS (
+    SELECT CAST(feed_ts AS DATE) AS feed_date, feed_ts, vehicle_id, vehicle_label, trip_id,
+           route_id, CAST(direction_id AS INTEGER) AS direction_id, start_date, start_time,
+           schedule_relationship, CAST(latitude AS DOUBLE) AS latitude,
+           CAST(longitude AS DOUBLE) AS longitude, CAST(bearing AS DOUBLE) AS bearing,
+           CAST(speed AS DOUBLE) AS speed,
+           CAST(current_stop_sequence AS INTEGER) AS current_stop_sequence, stop_id,
+           current_status, vehicle_ts, occupancy_status, _row_number
+    FROM src
+)
+SELECT * EXCLUDE (_dup, _rule),
+    coalesce(_rule, CASE WHEN _dup > 1 THEN 'duplicate_snapshot_row' END) AS _reason
+FROM (
+    SELECT *,
+        row_number() OVER (PARTITION BY feed_ts, vehicle_id ORDER BY _row_number) AS _dup,
+        CASE
+            WHEN feed_ts IS NULL THEN 'missing_field:feed_ts'
+            WHEN feed_date <> DATE {expected} THEN 'feed_date_mismatch'
+            WHEN coalesce(vehicle_id, '') = '' THEN 'missing_field:vehicle_id'
+            WHEN latitude NOT BETWEEN 41.0 AND 43.5 OR longitude NOT BETWEEN -72.5 AND -69.5
+              THEN 'coordinates_out_of_range'
+        END AS _rule
+    FROM typed
+)
+"""
+
+RT_TU_SQL = """
+WITH src AS (
+    SELECT *, row_number() OVER () AS _row_number
+    FROM read_parquet([{paths}], hive_partitioning = false, union_by_name = true)
+), typed AS (
+    SELECT CAST(feed_ts AS DATE) AS feed_date, feed_ts, trip_id, route_id,
+           CAST(direction_id AS INTEGER) AS direction_id, start_date, start_time,
+           schedule_relationship, vehicle_id, CAST(stop_updates AS INTEGER) AS stop_updates,
+           CAST(next_stop_sequence AS INTEGER) AS next_stop_sequence, next_stop_id,
+           next_arrival_ts, next_departure_ts, _row_number
+    FROM src
+)
+SELECT * EXCLUDE (_dup, _rule),
+    coalesce(_rule, CASE WHEN _dup > 1 THEN 'duplicate_snapshot_row' END) AS _reason
+FROM (
+    SELECT *,
+        row_number() OVER (
+            PARTITION BY feed_ts, trip_id, start_date ORDER BY _row_number
+        ) AS _dup,
+        CASE
+            WHEN feed_ts IS NULL THEN 'missing_field:feed_ts'
+            WHEN feed_date <> DATE {expected} THEN 'feed_date_mismatch'
+            WHEN coalesce(trip_id, '') = '' THEN 'missing_field:trip_id'
+            WHEN start_date IS NOT NULL AND try_strptime(start_date, '%Y%m%d') IS NULL
+              THEN 'invalid_type:start_date'
+        END AS _rule
+    FROM typed
+)
+"""
+
+RT_SPECS = {
+    "rt_vehicle_positions": (
+        "gtfs_rt_vehicle_positions",
+        C.RT_VEHICLE_POSITIONS,
+        RT_VP_SQL,
+        C.BRONZE_RT_VEHICLE_POSITIONS,
+    ),
+    "rt_trip_updates": (
+        "gtfs_rt_trip_updates",
+        C.RT_TRIP_UPDATES,
+        RT_TU_SQL,
+        C.BRONZE_RT_TRIP_UPDATES,
+    ),
+}
+
+
+def build_realtime(ctx: SilverContext) -> list[TableStats]:
+    """One partition per UTC day; a day is rebuilt whenever its set of bronze chunks changes."""
+    out = []
+    conn = connect()
+    for name, (source, contract, sql, bronze_contract) in RT_SPECS.items():
+        stats, t0 = TableStats(name), time.monotonic()
+        ckpt = ctx.checkpoint(name)
+        by_day: dict[str, list[dict]] = defaultdict(list)
+        for meta in bronze_metas(ctx.store, source):
+            m = re.search(r"/ingest_date=([0-9-]+)/", "/" + meta["key"])
+            if m:
+                by_day[m.group(1)].append(meta)
+        for day, metas in sorted(by_day.items()):
+            keys = sorted(m["key"] for m in metas)
+            signature = "|".join(keys)
+            if _unchanged(ctx, ckpt, day, signature):
+                stats.partitions_skipped += 1
+                continue
+            try:
+                paths = [ctx.store.path(k) for k in keys]
+                for path, key in zip(paths, keys, strict=True):
+                    C.check_bronze(pq.read_schema(path), bronze_contract, key)
+                listing = ", ".join(_sql_literal(p) for p in paths)
+                result = split(
+                    conn,
+                    sql.format(paths=listing, expected=f"'{day}'"),
+                    contract,
+                    f"{len(keys)} file(s) under source={source}/ingest_date={day}",
+                    None,
+                    ctx.now,
+                )
+                ctx.warehouse.replace_partitions(name, contract, "feed_date", [day], result.valid)
+                ctx.warehouse.write_quarantine(name, f"feed_date={day}", result.rejected)
+                _mark(ckpt, day, signature, result)
+                stats.add(result)
+                stats.partitions_loaded += 1
+            except Exception as exc:
+                stats.failures.append({"partition": day, "error": str(exc)[:500]})
+        stats.duration_seconds = round(time.monotonic() - t0, 2)
+        out.append(stats)
+    return out
+
+
 TABLE_GROUPS = {
     "subway_events": lambda ctx: [build_subway_events(ctx)],
     "alerts": lambda ctx: [build_alerts(ctx)],
     "weather_hourly": lambda ctx: [build_weather_hourly(ctx)],
     "facilities": lambda ctx: [build_facilities(ctx)],
     "gtfs": build_gtfs,
+    "realtime": build_realtime,
 }

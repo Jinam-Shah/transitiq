@@ -79,3 +79,19 @@ def test_bronze_silver_reconciliation(tmp_path):
     )
     r = Q.check_bronze_silver(store, tmp_path / "ck")
     assert r.status == Q.FAIL and "2026-11-02" in r.detail
+
+
+def test_volume_compares_same_weekday():
+    """Regression: a normal Sunday must not be flagged against weekday volumes."""
+    c = duckdb.connect()
+    c.execute("create schema silver")
+    # 28 days ending Sunday 2026-11-08: weekdays 100 rows, Sundays 50 rows
+    c.execute("""
+        create table silver.subway_events as
+        select d::date as service_date, n
+        from generate_series(date '2026-10-12', date '2026-11-08', interval 1 day) t(d),
+             range(100) u(n)
+        where isodow(d) <> 7 or n < 50
+    """)
+    r = Q.check_volume(c)
+    assert r.status == Q.PASS and r.value == 1.0 and "Sundays" in r.detail

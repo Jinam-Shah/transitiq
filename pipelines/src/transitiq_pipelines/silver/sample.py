@@ -28,6 +28,13 @@ ROUTES = {
     "Orange": ["place-ogmnl", "place-mlmnl", "place-welln", "place-astao", "place-sull"],
 }
 FETCHED = "2026-11-06T00:00:00+00:00"
+BUS_ROUTE = "SB1"
+BUS_STOPS = ["sb-1", "sb-2", "sb-3", "sb-4"]
+BUS_DAY = date(2026, 11, 3)  # a Tuesday covered by the sample collector window
+# six scheduled bus trips, every 10 minutes from 08:00 local (13:00 UTC); what happened to each:
+BUS_FATE = ["ran", "ran", "ran", "ghost", "canceled", "partial"]
+# trip 1 runs 8 minutes late (an 18-minute gap after trip 0), so trip 2 arrives right behind it:
+# the classic "long wait, then two buses at once" bunch
 
 
 def _platform(station: str) -> str:
@@ -65,11 +72,19 @@ def gtfs_zip() -> bytes:
                 t = 6 * 3600 + n * 600 + seq * 120
                 hhmmss = f"{t // 3600:02d}:{t % 3600 // 60:02d}:{t % 60:02d}"
                 stop_times.append(f"{trip},{hhmmss},{hhmmss},{_platform(station)},{seq}")
+    for n in range(len(BUS_FATE)):
+        trip = f"{BUS_ROUTE}-{n}"
+        trips.append(f"{BUS_ROUTE},weekday,{trip},Sample,0")
+        for seq, stop in enumerate(BUS_STOPS, start=1):
+            t = 8 * 3600 + n * 600 + (seq - 1) * 300
+            hhmmss = f"{t // 3600:02d}:{t % 3600 // 60:02d}:{t % 60:02d}"
+            stop_times.append(f"{trip},{hhmmss},{hhmmss},{stop},{seq}")
     files = {
         "feed_info.txt": "feed_publisher_name,feed_version\nMBTA,Sample feed\n",
         "routes.txt": (
             "route_id,agency_id,route_short_name,route_long_name,route_type,route_color\n"
             "Red,1,,Red Line,1,DA291C\nOrange,1,,Orange Line,1,ED8B00\n"
+            f"{BUS_ROUTE},1,SB1,Sample Bus,3,FFC72C\n"
         ),
         "stops.txt": "\n".join(stops) + "\n",
         "trips.txt": "\n".join(trips) + "\n",
@@ -237,6 +252,92 @@ def facilities_json() -> dict:
     }
 
 
+def realtime_tables() -> tuple[pa.Table, pa.Table]:
+    """Collector-shaped VP/TU rows: snapshots every minute 12:50-14:20 UTC on BUS_DAY."""
+    from transitiq_pipelines.realtime.feeds import TU_SCHEMA, VP_SCHEMA
+
+    vp, tu = [], []
+    start = datetime(BUS_DAY.year, BUS_DAY.month, BUS_DAY.day, 12, 50, tzinfo=UTC)
+    sched0 = datetime(BUS_DAY.year, BUS_DAY.month, BUS_DAY.day, 13, 0, tzinfo=UTC)
+    for minute in range(91):
+        ts = start + timedelta(minutes=minute)
+        for n, fate in enumerate(BUS_FATE):
+            trip = f"{BUS_ROUTE}-{n}"
+            late = timedelta(minutes=8) if n == 1 else timedelta(0)
+            t_start = sched0 + timedelta(minutes=10 * n) + late
+            progress = (ts - t_start) / timedelta(minutes=5)  # stops passed
+            base = {
+                "trip_id": trip,
+                "route_id": BUS_ROUTE,
+                "direction_id": 0,
+                "start_date": BUS_DAY.strftime("%Y%m%d"),
+                "start_time": (sched0 + timedelta(minutes=10 * n)).strftime("%H:%M:%S"),
+            }
+            if fate == "canceled":
+                if ts < t_start:
+                    tu.append(
+                        {
+                            **base,
+                            "feed_ts": ts,
+                            "schedule_relationship": "CANCELED",
+                            "stop_updates": 0,
+                        }
+                    )
+                continue
+            if progress > len(BUS_STOPS) - 1 or progress < -10:
+                continue
+            next_seq = max(1, int(progress) + 2) if progress >= 0 else 1
+            if fate == "partial" and next_seq > 2:
+                continue  # vehicle vanishes after stop 1
+            if next_seq > len(BUS_STOPS):
+                continue
+            eta = t_start + timedelta(minutes=5 * (next_seq - 1))
+            tu.append(
+                {
+                    **base,
+                    "feed_ts": ts,
+                    "schedule_relationship": "SCHEDULED",
+                    "vehicle_id": None if fate == "ghost" else f"bus-{n}",
+                    "stop_updates": len(BUS_STOPS) - next_seq + 1,
+                    "next_stop_sequence": next_seq,
+                    "next_stop_id": BUS_STOPS[next_seq - 1],
+                    "next_arrival_ts": eta,
+                    "next_departure_ts": eta,
+                }
+            )
+            if fate != "ghost" and progress >= 0:
+                vp.append(
+                    {
+                        **base,
+                        "feed_ts": ts,
+                        "vehicle_id": f"bus-{n}",
+                        "vehicle_label": str(n),
+                        "schedule_relationship": "SCHEDULED",
+                        "latitude": 42.3,
+                        "longitude": -71.1,
+                        "current_stop_sequence": next_seq,
+                        "stop_id": BUS_STOPS[next_seq - 1],
+                        "current_status": "IN_TRANSIT_TO",
+                        "vehicle_ts": ts,
+                    }
+                )
+        # an unrelated subway vehicle keeps the collector "alive" every minute
+        vp.append(
+            {
+                "feed_ts": ts,
+                "vehicle_id": "R-1",
+                "trip_id": "ADDED-1",
+                "route_id": "Red",
+                "schedule_relationship": "ADDED",
+                "latitude": 42.35,
+                "longitude": -71.06,
+                "current_status": "IN_TRANSIT_TO",
+                "vehicle_ts": ts,
+            }
+        )
+    return (pa.Table.from_pylist(vp, schema=VP_SCHEMA), pa.Table.from_pylist(tu, schema=TU_SCHEMA))
+
+
 def write_sample_bronze(store: LocalBronzeStore) -> None:
     _put(
         store,
@@ -269,4 +370,17 @@ def write_sample_bronze(store: LocalBronzeStore) -> None:
         "source=mbta_v3_facilities/snapshot_date=2026-11-06/facilities_sample.json",
         json.dumps(facilities_json()).encode(),
         {"source": "mbta_v3_facilities"},
+    )
+    vp, tu = realtime_tables()
+    _put(
+        store,
+        f"source=gtfs_rt_vehicle_positions/ingest_date={BUS_DAY}/vp_sample.parquet",
+        _parquet(vp),
+        {"source": "gtfs_rt_vehicle_positions", "rows": vp.num_rows},
+    )
+    _put(
+        store,
+        f"source=gtfs_rt_trip_updates/ingest_date={BUS_DAY}/tu_sample.parquet",
+        _parquet(tu),
+        {"source": "gtfs_rt_trip_updates", "rows": tu.num_rows},
     )

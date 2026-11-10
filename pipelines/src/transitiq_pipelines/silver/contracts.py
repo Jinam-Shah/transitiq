@@ -185,6 +185,46 @@ GTFS_CALENDAR_DATES = _schema(
     *_FEED,
 )
 
+# GTFS-Realtime snapshots (our collector's compact rows; D-021). feed_date = UTC date of feed_ts.
+RT_VEHICLE_POSITIONS = _schema(
+    ("feed_date", pa.date32()),
+    ("feed_ts", TS),
+    ("vehicle_id", STR),
+    ("vehicle_label", STR),
+    ("trip_id", STR),
+    ("route_id", STR),
+    ("direction_id", I32),
+    ("start_date", STR),
+    ("start_time", STR),
+    ("schedule_relationship", STR),
+    ("latitude", F64),
+    ("longitude", F64),
+    ("bearing", F64),
+    ("speed", F64),
+    ("current_stop_sequence", I32),
+    ("stop_id", STR),
+    ("current_status", STR),
+    ("vehicle_ts", TS),
+    ("occupancy_status", STR),
+)
+
+RT_TRIP_UPDATES = _schema(
+    ("feed_date", pa.date32()),
+    ("feed_ts", TS),
+    ("trip_id", STR),
+    ("route_id", STR),
+    ("direction_id", I32),
+    ("start_date", STR),
+    ("start_time", STR),
+    ("schedule_relationship", STR),
+    ("vehicle_id", STR),
+    ("stop_updates", I32),
+    ("next_stop_sequence", I32),
+    ("next_stop_id", STR),
+    ("next_arrival_ts", TS),
+    ("next_departure_ts", TS),
+)
+
 SILVER_TABLES: dict[str, pa.Schema] = {
     "subway_events": SUBWAY_EVENTS,
     "alerts": ALERTS,
@@ -196,6 +236,8 @@ SILVER_TABLES: dict[str, pa.Schema] = {
     "gtfs_stop_times": GTFS_STOP_TIMES,
     "gtfs_calendar": GTFS_CALENDAR,
     "gtfs_calendar_dates": GTFS_CALENDAR_DATES,
+    "rt_vehicle_positions": RT_VEHICLE_POSITIONS,
+    "rt_trip_updates": RT_TRIP_UPDATES,
 }
 
 # ---------- bronze contracts (what upstream files must contain) ----------
@@ -252,6 +294,23 @@ BRONZE_LAMP_ALERTS = {
     "informed_entity.stop_id": STRING,
     "informed_entity.facility_id": STRING,
     "informed_entity.activities": STRING,
+}
+
+
+# Bronze parquet written by our own collector (realtime/feeds.py): same columns minus lineage.
+BRONZE_RT_VEHICLE_POSITIONS = {
+    "feed_ts": TIMESTAMP,
+    "vehicle_id": STRING,
+    "trip_id": STRING,
+    "latitude": "double",
+    "longitude": "double",
+}
+BRONZE_RT_TRIP_UPDATES = {
+    "feed_ts": TIMESTAMP,
+    "trip_id": STRING,
+    "start_date": STRING,
+    "schedule_relationship": STRING,
+    "next_stop_sequence": INTEGER,
 }
 
 

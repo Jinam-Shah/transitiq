@@ -61,21 +61,30 @@ def check_freshness(conn, today: date, warn_days: int = 2, fail_days: int = 7) -
 
 
 def check_volume(conn, low_warn=0.7, high_warn=1.5, low_fail=0.3) -> CheckResult:
+    """Newest day vs the median of the same weekday over the previous 4 weeks.
+
+    Comparing a Sunday with all days flagged every Sunday (fewer trains run); the first Airflow
+    run did exactly that. Falls back to all recent days when fewer than 2 same-weekday days exist.
+    """
     rows = conn.execute(
         "select service_date, count(*) from silver.subway_events "
         "group by 1 order by 1 desc limit 29"
     ).fetchall()
     if len(rows) < 8:
         return CheckResult("volume", WARN, None, "needs >= 8 days", f"only {len(rows)} day(s)")
-    (latest_day, latest), history = rows[0], [n for _, n in rows[1:]]
-    median = statistics.median(history)
+    (latest_day, latest), history = rows[0], rows[1:]
+    same = [n for d, n in history if d.isoweekday() == latest_day.isoweekday()]
+    basis, label = (
+        (same, f"{latest_day:%A}s") if len(same) >= 2 else ([n for _, n in history], "days")
+    )
+    median = statistics.median(basis)
     ratio = latest / median if median else 0.0
     return CheckResult(
         "volume",
         _status(ratio < low_fail, ratio < low_warn or ratio > high_warn),
         round(ratio, 3),
-        f"warn outside {low_warn}-{high_warn}x, fail < {low_fail}x of 28-day median",
-        f"{latest_day}: {latest:,} rows vs median {median:,.0f}",
+        f"warn outside {low_warn}-{high_warn}x, fail < {low_fail}x of recent median",
+        f"{latest_day}: {latest:,} rows vs median {median:,.0f} of {len(basis)} recent {label}",
     )
 
 
