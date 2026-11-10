@@ -2,9 +2,9 @@ version: 2
 
 models:
   - name: mart_reliability_route_hour
-    description: "Reliability per route x day type x 15-minute bucket over all loaded history."
+    description: Reliability per route x day type x 15-minute bucket over all loaded history.
     data_tests:
-      - unique_combination: {arguments: {columns: [route_id, day_type, time_bucket]}}
+      - {unique_combination: {arguments: {columns: [route_id, day_type, time_bucket]}}}
     columns:
       - name: route_id
         data_type: varchar
@@ -12,48 +12,57 @@ models:
         data_type: varchar
       - name: time_bucket
         data_type: integer
-        description: "0-95: 15-minute bucket of the local (America/New_York) day."
+        description: '0-95: 15-minute bucket of the local (America/New_York) day.'
         data_tests:
           - not_null
       - name: segments
         data_type: bigint
       - name: on_time_rate
         data_type: double
-        description: "Share of segments with actual travel <= scheduled + 60 s."
+        description: Share of segments with actual travel <= scheduled + 60 s.
         data_tests:
-          - between: {arguments: {min_value: 0, max_value: 1}}
+          - {between: {arguments: {max_value: 1, min_value: 0}}}
       - name: travel_ratio_p50
         data_type: double
-        description: "Median of actual / scheduled segment travel time."
+        description: Median of actual / scheduled segment travel time.
       - name: travel_ratio_p90
         data_type: double
-        description: "90th percentile of actual / scheduled segment travel time."
+        description: 90th percentile of actual / scheduled segment travel time.
       - name: avg_delay_seconds
         data_type: double
       - name: arrivals
         data_type: bigint
       - name: headway_cv
         data_type: double
-        description: "Coefficient of variation of headways (stddev / mean); higher = less regular."
+        description: Coefficient of variation of headways (stddev / mean); higher = less regular.
       - name: headway_adherence
         data_type: double
-        description: "Share of headways <= 150% of scheduled."
+        description: Share of headways <= 150% of scheduled.
         data_tests:
-          - between: {arguments: {min_value: 0, max_value: 1}}
+          - {between: {arguments: {max_value: 1, min_value: 0}}}
       - name: bunching_events
         data_type: bigint
       - name: bunching_index
         data_type: double
-        description: "Bunching events per arrival."
+        description: Bunching events per arrival.
         data_tests:
-          - between: {arguments: {min_value: 0, max_value: 1}}
+          - {between: {arguments: {max_value: 1, min_value: 0}}}
+      - name: judged_trips
+        data_type: bigint
+        description: Real-time-covered scheduled trips with status ran, partial or ghost.
+      - name: ghost_trips
+        data_type: bigint
+      - name: canceled_trips
+        data_type: bigint
       - name: ghost_rate
         data_type: double
-        description: "Share of scheduled trips that never ran; null until Phase 6."
+        description: Share of scheduled trips that never ran; null until Phase 6.
+        data_tests:
+          - between: {arguments: {min_value: 0, max_value: 1}}
   - name: mart_stop_reliability
-    description: "Wait-time reliability per stop x day type x 15-minute bucket."
+    description: Wait-time reliability per stop x day type x 15-minute bucket.
     data_tests:
-      - unique_combination: {arguments: {columns: [stop_id, day_type, time_bucket]}}
+      - {unique_combination: {arguments: {columns: [stop_id, day_type, time_bucket]}}}
     columns:
       - name: stop_id
         data_type: varchar
@@ -63,12 +72,12 @@ models:
         data_type: varchar
       - name: time_bucket
         data_type: integer
-        description: "0-95: 15-minute bucket of the local (America/New_York) day."
+        description: '0-95: 15-minute bucket of the local (America/New_York) day.'
       - name: arrivals
         data_type: bigint
       - name: expected_wait_seconds
         data_type: double
-        description: "Average wait for a rider arriving at a random time: E[h^2] / (2 E[h])."
+        description: 'Average wait for a rider arriving at a random time: E[h^2] / (2 E[h]).'
         data_tests:
           - positive
       - name: headway_p50_seconds
@@ -81,6 +90,6 @@ models:
         data_type: double
       - name: reliability_score
         data_type: double
-        description: "Share of headways <= 150% of scheduled."
+        description: Share of headways <= 150% of scheduled.
         data_tests:
-          - between: {arguments: {min_value: 0, max_value: 1}}
+          - {between: {arguments: {max_value: 1, min_value: 0}}}

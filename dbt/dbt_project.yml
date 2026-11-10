@@ -15,6 +15,9 @@ models:
     staging:
       +schema: staging
       +materialized: view
+    intermediate:
+      +schema: intermediate
+      +materialized: table
     marts:
       +schema: gold
       +materialized: table
@@ -37,3 +40,9 @@ vars:
   long_gap_headway_ratio: 1.5        # gap before a bunch counts as "long" at >= 150% of scheduled
   reliable_headway_ratio: 1.5        # a headway is reliable if <= 150% of scheduled
   local_timezone: "America/New_York"
+  rt_max_gap_minutes: 5              # collector gaps longer than this break coverage (D-022)
+  ghost_grace_minutes: 2             # a trip is judged only if covered from start-2 to end+2 min
+  ran_min_stop_share: 0.8            # "ran" = reached >= 80% of its stops or seen near its end
+  ran_end_slack_minutes: 10
+  rt_route_types: [2, 3, 4]          # commuter rail, bus, ferry: trip ids match GTFS (D-022)
+  max_prediction_age_minutes: 15     # ignore stop predictions older than this

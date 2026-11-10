@@ -2,7 +2,7 @@
 
 **Boston transit reliability, measured, not scheduled.** TransitIQ tells MBTA riders when the train *actually* comes, gives each rider a "leave by" time they can trust, and surfaces problems the official apps don't show: ghost trips, bus bunching, and elevator outages.
 
-> **Status:** Phase 5 (Airflow daily pipeline, quality checks, gold published to Postgres/Neon).
+> **Status:** Phase 6 (GTFS-Realtime collector, ghost trips and live bus bunching).
 >
 > **dbt docs:** https://jinam-shah.github.io/transitiq/ (schema, lineage and tests; row counts there come from a small synthetic sample, not real data).
 
@@ -20,6 +20,7 @@ This table is kept honest as the project grows. "LocalStack" means an AWS emulat
 | dbt gold star schema (`dbt build`) | `pipelines` Docker container, DuckDB file `data/warehouse/transitiq.duckdb` | Built (Phase 4) |
 | dbt docs | GitHub Pages, built in CI from synthetic sample data | Built (Phase 4) |
 | Daily orchestration | Airflow 3.1 in local Docker (`transitiq_daily` DAG) | Built (Phase 5) |
+| GTFS-Realtime collector | Local Docker `realtime` service, every 30 s while the laptop is on | Built (Phase 6) |
 | Model training | Local Docker (same image) | Planned |
 | Gold tables for the app | Local Docker Postgres always; **Neon free tier** when `NEON_DATABASE_URL` is set (`transitiq-gold publish`) | Built (Phase 5) |
 | Backend API | Render free tier | Planned |
@@ -146,6 +147,21 @@ docker compose run --rm pipelines transitiq-gold publish    # local Postgres (+ 
 
 Quality checks (D-019): freshness, volume vs 28-day median, bronze/silver/gold reconciliation, quarantine rate, duplicates, null share, weather coverage. A failing check stops the run before publishing.
 
+## Real-time: ghost trips and bus bunching (Phase 6)
+
+```powershell
+docker compose --profile realtime up -d realtime      # collect MBTA GTFS-Realtime every 30 s
+docker compose --profile realtime stop realtime       # stop collecting
+```
+
+The collector writes compact snapshots to bronze (D-021). The daily DAG turns them into `silver.rt_*` tables and the gold models `fact_ghost_trip` (scheduled bus / commuter rail / ferry trips that never ran), `fact_bus_arrival` and bus events in `fact_bunching_event` (D-022). Ghost and bunching metrics exist only for periods the collector covered.
+
+A trip is judged only if one unbroken collection window covers all of it, and bus headways are never measured across a gap (D-024). Keep the PC awake while collecting: if it sleeps, the collector logs `collection gap ... suspended` and those minutes are simply missing. First real numbers are in [METRICS.md](METRICS.md#real-time-phase-6).
+
+```powershell
+docker compose --profile realtime logs realtime | Select-String "gap|stats"   # why and when it paused
+```
+
 ## AWS ingestion design (on LocalStack)
 
 EventBridge schedules trigger an **ingest** Lambda that writes raw files to the **bronze** bucket: live MBTA V3 alert snapshots every 30 minutes, the facility list daily, and a daily heartbeat. Each new bronze NDJSON file triggers a **validate** Lambda that writes valid rows (with lineage columns) to **silver** and rejected rows (with a reason) to **quarantine**. Failed async events go to an **SQS dead-letter queue**. Details and diagram: [infra/terraform/README.md](infra/terraform/README.md).
@@ -177,6 +193,7 @@ GitHub Actions runs Ruff, pytest (including moto-mocked Lambda tests), `terrafor
 - `transitiq-silver` must run in Docker on Windows (PyIceberg path bug, D-012).
 - The DuckDB warehouse file allows one writer at a time: don't run `docker compose run pipelines ...` commands while the Airflow DAG is running.
 - Only compact gold tables are published to Postgres; detailed facts stay in DuckDB (D-018).
+- Ghost trips are judged only for commuter rail, bus and ferry (subway real-time trip ids do not match the schedule), and only while the local collector was running (D-021, D-022).
 - No public per-day bus history was found; bus reliability will come from our own GTFS-Realtime sampling (Phase 6).
 - Airflow runs in single-container `standalone` mode with login disabled. Local development only.
 

@@ -169,3 +169,34 @@ These are TransitIQ's definitions, not official MBTA metrics; all thresholds are
 - **Choice:** (c). `data/warehouse` (Iceberg tables, SQLite catalog, DuckDB file) is the `warehouse` volume, mounted at `/app/data/warehouse` in `airflow` and `pipelines`. Bronze, checkpoints, run logs and quarantine stay in the shared folder (small, sequential writes). The volume is filled by **rebuilding silver from bronze** (`transitiq-silver build --rebuild`), not by copying, which also proves that silver is reproducible from bronze. DuckDB also gets a memory cap (`TRANSITIQ_DUCKDB_MEMORY`, default 4GB) and `dbt_build` retries once.
 - **Trade-off:** the warehouse is no longer visible in Windows Explorer; inspect it through the containers.
 - **Cost impact:** $0.
+
+## D-021: GTFS-Realtime collector stores compact rows, plus periodic raw snapshots (2026-11-09)
+
+- **Problem:** Ghost trips and bus bunching need continuous real-time observations. MBTA's TripUpdates feed was 819 KB per snapshot (27,237 stop predictions) and VehiclePositions 69 KB when checked on 2026-11-09; raw snapshots every 30 s would be about 2.5 GB per day.
+- **Choice:** `transitiq-realtime collect` (a `realtime` Docker service) parses each snapshot into compact rows: every vehicle, and one row per trip with only its **next** stop prediction. Rows are buffered and written to bronze every 10 minutes as Parquet (one file per feed and UTC day). A raw gzip snapshot is also kept every 15 minutes, so the parser can be re-run on real data and replayed (`transitiq-realtime replay`). Snapshots whose feed header timestamp has not changed are skipped.
+- **Measured:** 2.5 minutes of real snapshots = 10,258 rows, 172 KB, so about 100 MB per day at a 30 s interval (an estimate from that sample; to be measured on a real day in METRICS.md).
+- **Honest limit:** the collector runs only while the laptop and Docker are on. Ghost-trip and bunching metrics exist only for covered periods, and every judged trip must lie fully inside a covered window (D-022). The scheduled GitHub Actions sampler from the hosting plan is built with the other schedules in Phase 10.
+- **Cost impact:** $0. Disk on the laptop.
+
+## D-022: Ghost-trip and live bunching definitions (2026-11-09)
+
+- **Scope:** ghost trips are judged for **commuter rail, bus and ferry** only. Checked on a live snapshot: every scheduled bus and commuter-rail trip in the feed matched a GTFS trip id; the unmatched ones were all `ADDED` trips (extra service). Subway and light rail mostly use `ADDED` trip ids, so they cannot be matched to the schedule; subway reliability comes from LAMP history instead.
+- **Coverage:** collector windows break at gaps over 5 minutes. A scheduled trip is judged only if a window covers it from 2 minutes before its scheduled start to 2 minutes after its scheduled end.
+- **Status:** `canceled` if TripUpdates marked it CANCELED (riders were told); `ghost` if no vehicle was ever seen on it (`was_predicted` shows whether riders saw predictions for it anyway, which is the case the spec calls a ghost); `ran` if it reached at least 80% of its stops or was seen within 10 minutes of its scheduled end; otherwise `partial` (vanished partway).
+- **Bus arrivals:** the last prediction made while a stop was still the trip's next stop, kept only once the trip moved on to a later stop, only if the prediction was at most 15 minutes from the snapshot, and **only for trips seen with a vehicle**. Without that last rule a ghost trip's advancing predictions created phantom arrivals and fake bunches; the synthetic sample caught this before it reached real data.
+- **Bunching (bus):** same rule as subway (D-015), using the scheduled headway between this trip and the previous scheduled trip at the same stop, route and direction.
+- **Verified:** a synthetic sample with known answers (six bus trips: ran, late, bunched, ghost, canceled, partial) is checked in CI by `scripts/check_sample_gold.py`.
+- **Cost impact:** $0.
+
+## D-023: Volume check compares the same weekday (2026-11-09)
+
+- **Problem:** The first green Airflow run warned that 2026-11-08 had 0.51x the median volume. 2026-11-08 was a Sunday, and Sundays run far fewer trains than the weekdays it was compared with.
+- **Choice:** compare the newest day with the median of the same weekday over the previous 4 weeks (falls back to all recent days when there are fewer than 2).
+
+## D-024: Bus headways stay inside one collection window; collector logs why it paused (2026-11-09)
+
+- **Problem:** The first real collection had three gaps of 19 to 64 minutes. Coverage windows already kept ghost-trip judgments honest, but bus headways were computed across gaps: the first bus seen after a 50-minute gap got a 50-minute "headway", and the next bunch was flagged as coming "after a long gap". That long gap was our outage, not the MBTA's. The collector also could not say why it paused: its stats showed no errors and no stale snapshots.
+- **Choice:** `fact_bus_arrival` records the coverage window each prediction came from (`coverage_window_start`, matched with 1 minute of slack because TripUpdates timestamps can sit a few seconds outside the VehiclePositions windows). Bus headways and `gap_before_seconds` are partitioned by that window, so the first bus after a gap has no headway. The collector compares the wall clock with Linux's monotonic clock each loop: a jump in only the wall clock means the PC slept or Docker paused its VM ("suspended"); a long loop on both clocks means slow fetches ("slow"). Both are logged and counted in the stats line, and fetches time out after 20 s instead of 60 s.
+- **Verified:** real recorded snapshots with a 6-minute hole cut in: 41 headways of up to 685 s would have spanned the gap, now none do. The synthetic sample's answers are unchanged.
+- **Cost impact:** $0.
+

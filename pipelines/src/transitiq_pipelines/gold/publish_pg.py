@@ -74,6 +74,12 @@ PUBLISH = (
         "ts >= (select max(ts) from gold.fact_bunching_event) - interval 90 day",
     ),
     PublishSpec(
+        "gold.fact_ghost_trip",
+        ("service_date", "trip_id"),
+        1_000_000,
+        "service_date >= (select max(service_date) from gold.fact_ghost_trip) - interval 35 day",
+    ),
+    PublishSpec(
         "ops.quality_results",
         None,
         100_000,

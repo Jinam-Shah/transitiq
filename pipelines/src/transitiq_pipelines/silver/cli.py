@@ -22,7 +22,7 @@ from transitiq_pipelines.checkpoint import Checkpoint
 from transitiq_pipelines.config import Paths
 from transitiq_pipelines.silver.contracts import SILVER_TABLES
 
-GROUPS = ["subway_events", "alerts", "weather_hourly", "facilities", "gtfs"]
+GROUPS = ["subway_events", "alerts", "weather_hourly", "facilities", "gtfs", "realtime"]
 
 
 def build_parser() -> argparse.ArgumentParser:

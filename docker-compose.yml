@@ -116,6 +116,20 @@ services:
       DBT_PROJECT_DIR: dbt
       DBT_PROFILES_DIR: dbt
 
+  # Continuous GTFS-Realtime collector (D-021). Start with:
+  #   docker compose --profile realtime up -d realtime
+  realtime:
+    image: transitiq-pipelines:local
+    profiles: ["realtime"]
+    user: "${AIRFLOW_UID:-50000}:0"
+    working_dir: /app
+    command: ["transitiq-realtime", "collect", "--interval", "30"]
+    restart: unless-stopped
+    volumes:
+      - .:/app
+    environment:
+      HOME: /tmp
+
 volumes:
   localstack-data:
   postgres-data:

@@ -96,6 +96,10 @@ jobs:
         run: >
           docker compose run --rm -e TRANSITIQ_DUCKDB=data_sample/warehouse/transitiq.duckdb
           pipelines dbt build
+      - name: Gold results on the sample are the known right answers
+        run: >
+          docker compose run --rm --entrypoint python pipelines
+          scripts/check_sample_gold.py data_sample/warehouse/transitiq.duckdb
       - name: dbt docs (static site)
         run: >
           docker compose run --rm -e TRANSITIQ_DUCKDB=data_sample/warehouse/transitiq.duckdb
