@@ -25,7 +25,8 @@ nexts as (
     from {{ ref('stg_rt_trip_updates') }}
     where schedule_relationship = 'SCHEDULED'
       and start_date is not null and next_stop_sequence is not null
-)
+),
+arrivals as (
 select
     n.service_date,
     n.trip_id,
@@ -58,3 +59,18 @@ where n.rn = 1
   and n.stop_sequence < n.furthest_sequence
   and n.predicted_ts is not null
   and abs(date_diff('second', n.feed_ts, n.predicted_ts)) <= {{ var('max_prediction_age_minutes') }} * 60
+)
+-- The same vehicle reported at the same stop again within 2 minutes (e.g. under two trip ids
+-- around a terminal) is one arrival, not two buses: keep the first (D-026).
+select * exclude (prev_same_vehicle_ts)
+from (
+    select
+        *,
+        lag(arrival_ts) over (
+            partition by service_date, vehicle_id, stop_id order by arrival_ts, trip_id
+        ) as prev_same_vehicle_ts
+    from arrivals
+)
+where vehicle_id is null
+   or prev_same_vehicle_ts is null
+   or arrival_ts - prev_same_vehicle_ts > interval 2 minute

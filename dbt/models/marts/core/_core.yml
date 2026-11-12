@@ -210,10 +210,11 @@ models:
       - name: vehicles_involved
         data_type: integer
       - name: headway_seconds
+        description: Seconds since the previous vehicle at this stop; 0 means two different vehicles arrived together (D-026).
         data_type: bigint
         data_tests:
           - not_null
-          - positive
+          - between: {arguments: {min_value: 0, max_value: 86400}}
       - name: scheduled_headway_seconds
         data_type: bigint
         data_tests:
