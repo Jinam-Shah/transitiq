@@ -5,9 +5,13 @@ transitiq:
     local:
       type: duckdb
       path: "{{ env_var('TRANSITIQ_DUCKDB', 'data/warehouse/transitiq.duckdb') }}"
-      threads: 4
+      # Models run one at a time by default: they share one DuckDB memory_limit, and four big
+      # models at once ran out of memory on a laptop with 2GB to spare (D-025).
+      threads: "{{ env_var('TRANSITIQ_DBT_THREADS', '1') | int }}"
       settings:
         TimeZone: UTC
         # Leave room for Airflow, Postgres and LocalStack in Docker Desktop's memory.
         memory_limit: "{{ env_var('TRANSITIQ_DUCKDB_MEMORY', '4GB') }}"
+        # CPU threads inside one query; each needs its own buffers, so fewer threads = less memory.
+        threads: "{{ env_var('TRANSITIQ_DUCKDB_THREADS', '4') | int }}"
         preserve_insertion_order: false

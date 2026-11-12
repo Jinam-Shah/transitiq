@@ -200,3 +200,18 @@ These are TransitIQ's definitions, not official MBTA metrics; all thresholds are
 - **Verified:** real recorded snapshots with a 6-minute hole cut in: 41 headways of up to 685 s would have spanned the gap, now none do. The synthetic sample's answers are unchanged.
 - **Cost impact:** $0.
 
+## D-025: dbt runs one model at a time, with a DuckDB memory cap set per machine (2026-11-10)
+
+- **Problem:** After the real-time models were added, `dbt_build` in Airflow failed repeatedly. The audit log showed `state mismatch` (Airflow's worker process for the task died while dbt was still running), and the retry then hit `Could not set lock on file transitiq.duckdb`, because the old dbt still held the file. Docker Desktop had 7.27 GiB in total, about 5.5 GiB already used by other containers, while DuckDB was allowed 4 GB. With the cap lowered to 2 GB, DuckDB failed cleanly instead: `Out of Memory Error: could not allocate block of size 256.0 KiB (1.8 GiB/1.8 GiB used)` in `fact_alert`, with 4 models erroring and 48 skipped. dbt ran 4 models at once, and they all share one DuckDB memory cap.
+- **Choice:** dbt threads default to 1 (`TRANSITIQ_DBT_THREADS`), so each model gets the whole cap; DuckDB's CPU threads per query are set by `TRANSITIQ_DUCKDB_THREADS` (default 4), because each thread needs its own buffers. The memory cap stays `TRANSITIQ_DUCKDB_MEMORY` (default 4GB; 2GB in `.env.example` for a laptop that also runs other projects). All three are read from `.env`.
+- **Trade-off:** a slower build on large machines, which can raise the thread count in `.env`.
+- **Cost impact:** $0.
+
+
+## D-026: fact_alert built from small pieces; zero bus headways allowed, same-vehicle repeats removed (2026-11-12)
+
+- **Problem 1:** With models running one at a time and a 2 GB cap (D-025), `fact_alert` still failed: `Out of Memory Error ... (1.8 GiB/1.8 GiB used)`. Reproduced on the real alert history (5,171,906 rows, 984,017 alert versions): the old query, one `GROUP BY` with `string_agg(DISTINCT ... ORDER BY ...)` per version, passed at 1, 1.5, 3 and 4 GB but **failed at 2 and 2.5 GB** with 4 DuckDB threads. DuckDB plans the aggregation differently at different caps, and 2 GB was a bad spot.
+- **Choice 1:** build the scalar columns, the text columns (`DISTINCT ON`), and the route / stop / facility lists (distinct pairs first, then `list` + `list_sort`) as separate pieces and join them. Passes at every cap from 1 GB to 4 GB with 4 or 16 threads, about 7x faster (14.7 s to 2.1 s), and gives identical output (984,017 rows, 0 differences in any column).
+- **Problem 2:** the dbt test `positive` on `fact_bunching_event.headway_seconds` failed with 38 rows of headway 0: two bus arrivals at the same stop, route and direction with the same timestamp.
+- **Choice 2:** an arrival repeated by the **same vehicle** at the same stop within 2 minutes (for example under two trip ids around a terminal) is kept once in `fact_bus_arrival`. A headway of 0 between **different** vehicles is a real "two buses at once" bunch, so the test now allows 0 (`between 0 and 86400`). Subway headways come from LAMP and are unchanged.
+- **Cost impact:** $0.
