@@ -229,3 +229,11 @@ These are TransitIQ's definitions, not official MBTA metrics; all thresholds are
 - **Where it runs:** the `pipelines` and Airflow containers on the laptop. LightGBM needs the OpenMP runtime (`libgomp1`), added to both images. Not on Windows directly: the warehouse is on the Docker volume, and the ML tests skip there.
 - **Cost impact:** $0.
 
+## D-028: Ghost trips are judged only on routes that report positions that day (2026-11-13)
+
+- **Problem:** The first full real-time report gave a bus ghost rate of 5.71%. 393 of the 416 bus ghosts (95%) were on three rail-replacement shuttle routes (`Shuttle-BackBayClevelandCircle`, `Shuttle-BabcockStreetBackBay`, `Shuttle-FoxboroWalpole`): every one of their scheduled trips was a "ghost". These shuttles are in the GTFS schedule, but their buses do not report positions in GTFS-Realtime, so "never seen" says nothing about whether they ran.
+- **Options:** (a) exclude routes named `Shuttle-*` (works today, breaks silently if MBTA renames them or another untracked service appears); (b) judge a route only on days when at least one of its trips was seen with a vehicle.
+- **Choice:** (b). `fact_ghost_trip` joins scheduled trips to the routes that had a tracked, scheduled trip that service day. The synthetic sample now has a shuttle route with 3 scheduled trips a day and no positions; CI checks that none of its trips are judged.
+- **Trade-off:** a route whose entire service vanished for a whole day (no vehicle at all) is not counted as ghosts; that case is visible as an outage, not as individual ghost trips. Excluding the three shuttles from the existing numbers gives 23 ghosts in 6,891 judged bus trips (0.33%).
+- **Cost impact:** $0.
+

@@ -89,6 +89,15 @@ First real collection on the laptop, 2026-11-09 (UTC). The DAG run that built th
 | 2026-11-09 | Collector disk use | compact Parquet 4.57 MB for 203 snapshots (~65 MB/day at 30 s if continuous); raw `.pb.gz` 3.08 MB in 16 snapshot pairs (~18 MB/day at one pair per 15 min) | LOCAL-DOCKER | sizes of `data/bronze/source=gtfs_rt_*` |
 | 2026-11-09 | `dbt_build` with real-time models | 9 min 24 s (third try; tries 1-2 failed with a DuckDB file lock, cause not found: no leftover process in the Airflow container, no other transitiq container running) | LOCAL-DOCKER (Airflow 3.1) | Airflow UI, run 2026-11-09 21:14:50 UTC |
 | 2026-11-09 | Gap fix check (D-024) on real snapshots with a 6-minute hole cut in | 41 bus headways (up to 685 s) would have spanned the gap; now 0 | SANDBOX | replay of recorded snapshots + `dbt build` |
+| 2026-11-12 | Collected by the time of the 2026-11-12 DAG run | 2,008 VehiclePositions snapshots (about 16.7 hours at 30 s), 1,283,079 vehicle rows, 2,900,201 trip-update rows | LOCAL-DOCKER | report query on `silver.rt_*` |
+| 2026-11-12 | Unbroken coverage windows over 30 minutes | 8 windows, 0.5 to 5.42 hours; longest 2026-11-09 23:15 to 2026-11-10 04:40 UTC (651 snapshots) | LOCAL-DOCKER | `intermediate.int_rt_coverage` |
+| 2026-11-12 | Trips judged for ghost status (before D-028) | bus 7,284 (6,711 ran, 416 ghost, 145 canceled, 12 partial); commuter rail 236 (231 ran, 3 ghost, 2 partial); ferry 152 (151 ran, 1 partial) | LOCAL-DOCKER | `gold.fact_ghost_trip` |
+| 2026-11-12 | Ghost rate, raw (before D-028) | bus 5.71% (416 of 7,284), commuter rail 1.27% (3 of 236), ferry 0% | LOCAL-DOCKER | same |
+| 2026-11-12 | Why the raw bus rate was wrong | 393 of the 416 bus ghosts were on three rail-replacement shuttle routes that never report positions (Shuttle-BackBayClevelandCircle 201 of 201, Shuttle-BabcockStreetBackBay 182 of 182, Shuttle-FoxboroWalpole 10 of 10). Without them: 23 ghosts in 6,891 judged bus trips (0.33%). Fixed in D-028; the next DAG run recomputes it | LOCAL-DOCKER | same, arithmetic on the rows above |
+| 2026-11-12 | Ghost leaderboard, real routes (>= 10 judged trips) | CR-Franklin 2 of 15 (13.3%), 713 3 of 48 (6.3%), 121 1 of 16, 746 2 of 36, CR-Fairmount 1 of 27, 50 1 of 37 | LOCAL-DOCKER | same |
+| 2026-11-12 | Bus bunching events | 9,143 (3,741 right after a long gap); worst routes 32 (851), 66 (702), 57 (624), 39 (579), 77 (441) | LOCAL-DOCKER | `gold.fact_bunching_event` |
+| 2026-11-12 | Bus arrivals estimated | 262,442 arrivals on 11,939 trips; median delay 2.0 min, 90th percentile 9.4 min | LOCAL-DOCKER | `gold.fact_bus_arrival` |
+| 2026-11-12 | Collector disk use | compact Parquet 47.99 MB (vehicle positions 24.80 MB + trip updates 23.19 MB, 266 files each incl. sidecars) for 2,008 snapshots, i.e. about 69 MB per 24 hours of collection; raw `.pb.gz` 29.82 MB (372 files) | LOCAL-DOCKER | sizes of `data/bronze/source=gtfs_rt_*` |
 
 ## Leave-By Planner models (Phase 7)
 
@@ -119,7 +128,7 @@ Full-year run on the laptop (all subway history in the warehouse):
 ## Sections to fill as phases complete
 
 - dbt: model and test counts (Phase 4)
-- Real time: ghost-trip rate over a full covered day (Phase 6 follow-up)
+- Real time: bus ghost rate after D-028 (next DAG run)
 - API: p95 latency, test counts (Phase 8, 12)
 - Notifications sent, from `notification_log` (Phase 10)
 - Ask TransitIQ evaluation accuracy (Phase 11)

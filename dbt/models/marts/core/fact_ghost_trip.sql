@@ -1,9 +1,18 @@
 -- One row per scheduled commuter-rail / bus / ferry trip that the real-time collector fully
 -- covered. status: ran | partial (vanished partway) | ghost (never seen with a vehicle) |
 -- canceled (announced as CANCELED in TripUpdates). D-022.
-with judged as (
+with tracked as (
+    -- routes whose vehicles report positions at all that day. Rail-replacement shuttles
+    -- (Shuttle-*) are scheduled in GTFS but never send positions, so every trip would look
+    -- like a ghost; a route with no tracked trip that day is not judged (D-028).
+    select distinct strptime(start_date, '%Y%m%d')::date as service_date, route_id
+    from {{ ref('stg_rt_vehicle_positions') }}
+    where schedule_relationship = 'SCHEDULED' and trip_id is not null and start_date is not null
+),
+judged as (
     select s.*
     from {{ ref('int_scheduled_trips') }} as s
+    join tracked as tr on tr.service_date = s.service_date and tr.route_id = s.route_id
     join {{ ref('int_rt_coverage') }} as c
       on s.scheduled_start_ts - to_minutes({{ var('ghost_grace_minutes') }}) >= c.window_start
      and s.scheduled_end_ts + to_minutes({{ var('ghost_grace_minutes') }}) <= c.window_end

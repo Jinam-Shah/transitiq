@@ -33,6 +33,8 @@ BUS_STOPS = ["sb-1", "sb-2", "sb-3", "sb-4"]
 BUS_DAY = date(2026, 11, 3)  # a Tuesday covered by the sample collector window
 # six scheduled bus trips, every 10 minutes from 08:00 local (13:00 UTC); what happened to each:
 BUS_FATE = ["ran", "ran", "ran", "ghost", "canceled", "partial"]
+# a rail-replacement shuttle: scheduled in GTFS, but its buses never report positions (untracked)
+SHUTTLE_ROUTE = "Shuttle-Sample"
 # trip 1 runs 8 minutes late (an 18-minute gap after trip 0), so trip 2 arrives right behind it:
 # the classic "long wait, then two buses at once" bunch
 
@@ -79,12 +81,20 @@ def gtfs_zip() -> bytes:
             t = 8 * 3600 + n * 600 + (seq - 1) * 300
             hhmmss = f"{t // 3600:02d}:{t % 3600 // 60:02d}:{t % 60:02d}"
             stop_times.append(f"{trip},{hhmmss},{hhmmss},{stop},{seq}")
+    for n in range(3):
+        trip = f"{SHUTTLE_ROUTE}-{n}"
+        trips.append(f"{SHUTTLE_ROUTE},weekday,{trip},Shuttle,0")
+        for seq, stop in enumerate(BUS_STOPS, start=1):
+            t = 8 * 3600 + 300 + n * 600 + (seq - 1) * 300
+            hhmmss = f"{t // 3600:02d}:{t % 3600 // 60:02d}:{t % 60:02d}"
+            stop_times.append(f"{trip},{hhmmss},{hhmmss},{stop},{seq}")
     files = {
         "feed_info.txt": "feed_publisher_name,feed_version\nMBTA,Sample feed\n",
         "routes.txt": (
             "route_id,agency_id,route_short_name,route_long_name,route_type,route_color\n"
             "Red,1,,Red Line,1,DA291C\nOrange,1,,Orange Line,1,ED8B00\n"
             f"{BUS_ROUTE},1,SB1,Sample Bus,3,FFC72C\n"
+            f"{SHUTTLE_ROUTE},1,,Sample Shuttle,3,FFC72C\n"
         ),
         "stops.txt": "\n".join(stops) + "\n",
         "trips.txt": "\n".join(trips) + "\n",
