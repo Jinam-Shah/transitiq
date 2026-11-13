@@ -6,7 +6,9 @@ FROM apache/airflow:3.1.0-python3.12
 
 # The image runs as user "airflow" (uid 50000, group 0), which cannot write to /opt.
 USER root
-RUN mkdir -p /opt/transitiq-venv && chown airflow:0 /opt/transitiq-venv
+RUN mkdir -p /opt/transitiq-venv && chown airflow:0 /opt/transitiq-venv \
+    && apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
 USER airflow
 
 COPY pipelines/requirements-runtime.txt /tmp/requirements-runtime.txt
@@ -15,4 +17,4 @@ COPY pipelines/requirements-runtime.txt /tmp/requirements-runtime.txt
 RUN python -m venv /opt/transitiq-venv \
     && PIP_USER=false /opt/transitiq-venv/bin/pip install --no-cache-dir \
         -r /tmp/requirements-runtime.txt \
-    && /opt/transitiq-venv/bin/python -c "import duckdb, pyiceberg, psycopg, dbt.version"
+    && /opt/transitiq-venv/bin/python -c "import duckdb, pyiceberg, psycopg, dbt.version, lightgbm, mlflow"

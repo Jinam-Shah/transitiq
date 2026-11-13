@@ -70,7 +70,9 @@ Tests: 111 passed inside the container (`docker compose run --rm pipelines pytes
 | 2026-11-09 | Bronze/silver reconciliation | 371 of 371 days matched exactly | LOCAL-DOCKER | same |
 | 2026-11-09 | Gold segments | 13,434,100 travel-time segments from 14,808,616 silver events | LOCAL-DOCKER | same |
 | 2026-11-09 | Weather coverage of the subway date range | 8,924 of 8,952 hours (99.69%) | LOCAL-DOCKER | same |
-| _pending_ | Rows published to local Postgres / Neon, database size | from the `publish_gold` task log | LOCAL-DOCKER / PROD (Neon) | Airflow `publish_gold` log |
+| 2026-11-12 | Gold tables published | 12 tables; largest: mart_stop_reliability 91,997, fact_bunching_event 89,299, fact_alert 75,790, fact_facility_outage 26,335, mart_reliability_route_hour 12,540, fact_ghost_trip 7,672 rows | LOCAL-DOCKER Postgres and PROD (Neon free tier) | Airflow `publish_gold`, run 2026-11-12 17:49 UTC |
+| 2026-11-12 | Database size after publish | local 74.9 MB; Neon 74.2 MB (of the 800 MB budget, 1 GB free tier) | LOCAL-DOCKER / PROD (Neon) | same |
+| 2026-11-12 | `transitiq_daily` DAG, full run after D-025/D-026 | 5 min 39 s (dbt_build 3 min 39 s, one model at a time, 2 GB DuckDB cap) | LOCAL-DOCKER (Airflow 3.1) | Airflow UI, run 2026-11-12 17:49 UTC |
 
 ## Real time (Phase 6)
 
@@ -88,11 +90,36 @@ First real collection on the laptop, 2026-11-09 (UTC). The DAG run that built th
 | 2026-11-09 | `dbt_build` with real-time models | 9 min 24 s (third try; tries 1-2 failed with a DuckDB file lock, cause not found: no leftover process in the Airflow container, no other transitiq container running) | LOCAL-DOCKER (Airflow 3.1) | Airflow UI, run 2026-11-09 21:14:50 UTC |
 | 2026-11-09 | Gap fix check (D-024) on real snapshots with a 6-minute hole cut in | 41 bus headways (up to 685 s) would have spanned the gap; now 0 | SANDBOX | replay of recorded snapshots + `dbt build` |
 
+## Leave-By Planner models (Phase 7)
+
+Development run on **42 real service days** downloaded into the sandbox (2026-10-01 to 2026-11-11). The full-year run on the laptop goes in the table below it.
+
+| Date | Metric | Value | Env | Command / source |
+|---|---|---|---|---|
+| 2026-11-12 | Training rows (simulated riders) | 125,981 over 42 days, 300 per line, direction and day; 19 impossible rides dropped (0.015%). Three rebuilds gave byte-identical data | SANDBOX | `transitiq-ml dataset --rebuild` (11 s) |
+| 2026-11-12 | Split | train 2026-10-01..10-21 (62,990), valid 10-22..10-25 (11,999), cal 10-26..11-01 (20,995), test 11-02..11-11 (29,997) | SANDBOX | `transitiq-ml train --test-days 10 --cal-days 7 --valid-days 4` (8.3 s; two runs gave identical numbers) |
+| 2026-11-12 | Calibration on the 10 held-out days (share of real journeys under the estimate), after the conformal shift | p50 49.7%, p80 80.0%, p90 90.3%, p95 95.2% (raw, before the shift: 50.5%, 78.8%, 88.8%, 93.6%) | SANDBOX | same, 29,244 test riders with a schedule (753 without one are excluded from the comparison) |
+| 2026-11-12 | Schedule-only baseline calibration | p50 60.0%, p80 79.5%, p90 84.4%, p95 86.3% | SANDBOX | same |
+| 2026-11-12 | Pinball loss, model vs schedule baseline | p50 81.2 s vs 89.8 s (9.5% lower), p80 66.2 vs 73.3 (9.6%), p90 45.7 vs 54.0 (15.3%), p95 29.7 vs 41.5 (28.4%) | SANDBOX | same |
+| 2026-11-12 | p90 by line (share under it; pinball vs baseline) | Blue 90.9%, 10.6% lower; Green 90.7%, 25.8% lower; Mattapan 91.2%, 7.6% lower; Orange 91.1%, 7.0% lower; Red 87.8%, 16.5% lower | SANDBOX | same |
+| 2026-11-12 | Known-answer check of the training rows on the synthetic sample | 192 of 192 riders' wait, ride and journey match an independent calculation (32 caught a bunched train) | SANDBOX and CI | `scripts/check_sample_ml.py data_sample` |
+
+Full-year run on the laptop (all subway history in the warehouse):
+
+| Date | Metric | Value | Env | Command / source |
+|---|---|---|---|---|
+| 2026-11-13 | Training rows (simulated riders) | 1,071,325 over 13 months (2025-11-01 to 2026-11-11); 192 impossible rides dropped (0.018%) | LOCAL-DOCKER | `transitiq-ml dataset` (2 min 37 s) |
+| 2026-11-13 | Split | train 2025-11-01..2026-07-28 (254 days, 759,370), valid 07-29..08-11 (41,994), cal 08-12..09-11 (89,983), **test 2026-09-12..11-11 (60 days, 179,978)** | LOCAL-DOCKER | `transitiq-ml train` (109.7 s) |
+| 2026-11-13 | Calibration on the 60 held-out days (share of real journeys under the estimate), after the conformal shift | p50 49.3%, p80 79.4%, p90 89.4%, p95 94.5% | LOCAL-DOCKER | same, 177,613 test riders with a schedule |
+| 2026-11-13 | Schedule-only baseline calibration | p50 60.0%, p80 79.5%, p90 84.2%, p95 86.0% | LOCAL-DOCKER | same |
+| 2026-11-13 | Pinball loss, model vs schedule baseline | p50 81.7 s vs 90.2 s (9.4% lower), p80 66.3 vs 73.0 (9.2%), p90 45.1 vs 53.1 (14.9%), p95 29.0 vs 40.2 (27.8%) | LOCAL-DOCKER | same |
+| 2026-11-13 | p90 by line (share under it, schedule; pinball vs baseline) | Blue 90.2% (82.8%), 15.8% lower; Green 89.0% (77.9%), 19.6% lower; Mattapan 89.0% (89.5%), 6.6% lower; Orange 89.7% (85.2%), 11.1% lower; Red 89.1% (85.3%), 18.2% lower | LOCAL-DOCKER | same, about 35,000 riders per line |
+| 2026-11-13 | MLflow run | 125b8873deba45a4abbe88b7a0ce5a57 | LOCAL-DOCKER | `data/warehouse/ml/mlflow.db` |
+
 ## Sections to fill as phases complete
 
 - dbt: model and test counts (Phase 4)
 - Real time: ghost-trip rate over a full covered day (Phase 6 follow-up)
-- ML: calibration per quantile, pinball loss vs schedule baseline (Phase 7)
 - API: p95 latency, test counts (Phase 8, 12)
 - Notifications sent, from `notification_log` (Phase 10)
 - Ask TransitIQ evaluation accuracy (Phase 11)

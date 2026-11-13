@@ -8,7 +8,14 @@ from pathlib import Path
 import pytest
 from transitiq_pipelines import cli as ingest_cli
 from transitiq_pipelines.gold import cli as gold_cli
-from transitiq_pipelines.orchestration import DAILY_STEPS, Step, shell_command, validate
+from transitiq_pipelines.ml import cli as ml_cli
+from transitiq_pipelines.orchestration import (
+    DAILY_STEPS,
+    WEEKLY_ML_STEPS,
+    Step,
+    shell_command,
+    validate,
+)
 from transitiq_pipelines.silver import cli as silver_cli
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +23,7 @@ PARSERS = {
     "ingest": ingest_cli.build_parser,
     "silver": silver_cli.build_parser,
     "gold": gold_cli.build_parser,
+    "ml": ml_cli.build_parser,
 }
 
 
@@ -39,7 +47,9 @@ def test_order_is_ingest_silver_dbt_quality_publish():
 
 
 @pytest.mark.parametrize(
-    "step", [s for s in DAILY_STEPS if s.command[0] != "dbt"], ids=lambda s: s.name
+    "step",
+    [s for s in DAILY_STEPS + WEEKLY_ML_STEPS if s.command[0] != "dbt"],
+    ids=lambda s: s.name,
 )
 def test_every_command_parses_with_the_real_cli(step):
     kind, *args = step.command
@@ -72,8 +82,9 @@ def test_runtime_pins_match_project_pins():
     }
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["dependencies"]
     dbt = [
-        ln.strip()
-        for ln in (ROOT / "requirements-dbt.txt").read_text().splitlines()
+        ln.split("#")[0].strip()
+        for f in ("requirements-dbt.txt", "requirements-ml.txt")
+        for ln in (ROOT / f).read_text().splitlines()
         if ln.strip() and not ln.startswith("#")
     ]
     for pin in [p.split("#")[0].strip() for p in project] + dbt:
@@ -81,10 +92,17 @@ def test_runtime_pins_match_project_pins():
         assert runtime.get(name) == pin, f"{name}: runtime {runtime.get(name)!r} != {pin!r}"
 
 
-def test_dag_file_only_imports_orchestration_from_our_package():
-    text = (ROOT / "pipelines/airflow/dags/transitiq_daily.py").read_text()
+@pytest.mark.parametrize("dag", ["transitiq_daily.py", "transitiq_weekly_ml.py"])
+def test_dag_file_only_imports_orchestration_from_our_package(dag):
+    text = (ROOT / "pipelines/airflow/dags" / dag).read_text()
     ours = re.findall(r"from (transitiq_pipelines\S*) import", text)
     assert ours == ["transitiq_pipelines.orchestration"]
+
+
+def test_weekly_ml_steps():
+    validate(WEEKLY_ML_STEPS)
+    assert [s.name for s in WEEKLY_ML_STEPS] == ["ml_dataset", "ml_train"]
+    assert "-m transitiq_pipelines.ml.cli train" in shell_command(WEEKLY_ML_STEPS[1])
 
 
 def test_airflow_and_pipelines_mount_the_repo_at_the_same_path():

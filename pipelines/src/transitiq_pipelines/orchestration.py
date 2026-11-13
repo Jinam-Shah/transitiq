@@ -1,4 +1,4 @@
-"""The daily pipeline as plain data, so it can be tested without Airflow.
+"""The daily and weekly pipelines as plain data, so it can be tested without Airflow.
 
 pipelines/airflow/dags/transitiq_daily.py turns DAILY_STEPS into Airflow tasks. Keep this module
 stdlib-only: Airflow's own Python imports it while parsing the DAG.
@@ -33,6 +33,7 @@ MODULES = {
     "ingest": "transitiq_pipelines.cli",
     "silver": "transitiq_pipelines.silver.cli",
     "gold": "transitiq_pipelines.gold.cli",
+    "ml": "transitiq_pipelines.ml.cli",
 }
 
 INGEST = (
@@ -97,6 +98,26 @@ DAILY_STEPS: tuple[Step, ...] = (
         retries=2,
         timeout_minutes=30,
         doc="Compact gold tables to local Postgres, and to Neon when NEON_DATABASE_URL is set.",
+    ),
+)
+
+
+# Weekly retraining of the Leave-By Planner models (D-027). Runs after the Sunday daily refresh;
+# it reads gold from DuckDB, so it must not overlap a dbt build (max_active_runs and a later
+# start time; both DAGs use the same file only for reading here).
+WEEKLY_ML_STEPS: tuple[Step, ...] = (
+    Step(
+        "ml_dataset",
+        ("ml", "dataset"),
+        timeout_minutes=60,
+        doc="Simulated riders from gold; only new months (and the current one) are rebuilt.",
+    ),
+    Step(
+        "ml_train",
+        ("ml", "train"),
+        upstream=("ml_dataset",),
+        timeout_minutes=90,
+        doc="Fit p50/p80/p90/p95 models, calibrate on recent days, test on the newest 60 days.",
     ),
 )
 
