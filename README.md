@@ -2,7 +2,7 @@
 
 **Boston transit reliability, measured, not scheduled.** TransitIQ tells MBTA riders when the train *actually* comes, gives each rider a "leave by" time they can trust, and surfaces problems the official apps don't show: ghost trips, bus bunching, and elevator outages.
 
-> **Status:** Phase 6 (GTFS-Realtime collector, ghost trips and live bus bunching).
+> **Status:** Phase 7 (Leave-By Planner journey-time models: LightGBM quantiles, calibration, schedule baseline, MLflow).
 >
 > **dbt docs:** https://jinam-shah.github.io/transitiq/ (schema, lineage and tests; row counts there come from a small synthetic sample, not real data).
 
@@ -21,7 +21,7 @@ This table is kept honest as the project grows. "LocalStack" means an AWS emulat
 | dbt docs | GitHub Pages, built in CI from synthetic sample data | Built (Phase 4) |
 | Daily orchestration | Airflow 3.1 in local Docker (`transitiq_daily` DAG) | Built (Phase 5) |
 | GTFS-Realtime collector | Local Docker `realtime` service, every 30 s while the laptop is on | Built (Phase 6) |
-| Model training | Local Docker (same image) | Planned |
+| Model training (`transitiq-ml`, weekly DAG `transitiq_weekly_ml`) | `pipelines` / Airflow containers on the laptop; models and MLflow store on the `warehouse` volume | Built (Phase 7) |
 | Gold tables for the app | Local Docker Postgres always; **Neon free tier** when `NEON_DATABASE_URL` is set (`transitiq-gold publish`) | Built (Phase 5) |
 | Backend API | Render free tier | Planned |
 | Frontend | Vercel free tier | Planned |
@@ -162,6 +162,18 @@ A trip is judged only if one unbroken collection window covers all of it, and bu
 docker compose --profile realtime logs realtime | Select-String "gap|stats"   # why and when it paused
 ```
 
+## Leave-By Planner models (Phase 7)
+
+```powershell
+docker compose run --rm pipelines transitiq-ml dataset    # simulated riders from gold (one file per month)
+docker compose run --rm pipelines transitiq-ml train      # fit p50/p80/p90/p95, calibrate, test
+docker compose run --rm pipelines transitiq-ml report     # print the current model's report
+```
+
+Each training row is a simulated rider who reaches station O at a random time on a real day and goes to station D. The target is the **measured** time until they arrive at D on the first real train that left O after them and reached D (wait plus ride, any branch). Features are what a planner can know at that moment: line, stations, scheduled ride time and headway, calendar, weather, active MBTA service alerts, and how the line ran in the previous hour (D-027).
+
+One LightGBM model per quantile (50, 80, 90, 95%), trained on the oldest days. The newest 60 days are held out and never used to fit anything. A conformal shift fitted on the 30 days before them fixes the calibration. The **schedule-only baseline** is what the timetable promises: scheduled ride time plus a wait uniform over the scheduled headway. Calibration (how often real journeys fell under each estimate) and pinball loss against that baseline are in [METRICS.md](METRICS.md#leave-by-planner-models-phase-7). Runs are tracked in MLflow (sqlite store on the warehouse volume); `transitiq_weekly_ml` retrains every Sunday.
+
 ## AWS ingestion design (on LocalStack)
 
 EventBridge schedules trigger an **ingest** Lambda that writes raw files to the **bronze** bucket: live MBTA V3 alert snapshots every 30 minutes, the facility list daily, and a daily heartbeat. Each new bronze NDJSON file triggers a **validate** Lambda that writes valid rows (with lineage columns) to **silver** and rejected rows (with a reason) to **quarantine**. Failed async events go to an **SQS dead-letter queue**. Details and diagram: [infra/terraform/README.md](infra/terraform/README.md).
@@ -196,6 +208,8 @@ GitHub Actions runs Ruff, pytest (including moto-mocked Lambda tests), `terrafor
 - Ghost trips are judged only for commuter rail, bus and ferry (subway real-time trip ids do not match the schedule), and only while the local collector was running (D-021, D-022).
 - No public per-day bus history was found; bus reliability will come from our own GTFS-Realtime sampling (Phase 6).
 - Airflow runs in single-container `standalone` mode with login disabled. Local development only.
+- The models cover the subway only (LAMP history). Bus, commuter rail and ferry have no public per-day history (D-027).
+- Training uses observed weather; the planner will use a forecast, which is less accurate. Recent delay is known only for "leave now" plans; for a future date it is set to typical (D-027).
 
 ## Credits
 

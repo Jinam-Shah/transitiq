@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "transitiq"
-version = "0.6.0"
+version = "0.7.0"
 description = "Boston transit reliability platform built on MBTA data"
 requires-python = ">=3.12"
 dependencies = [
@@ -23,6 +23,7 @@ transitiq-ingest = "transitiq_pipelines.cli:main"
 transitiq-silver = "transitiq_pipelines.silver.cli:main"
 transitiq-gold = "transitiq_pipelines.gold.cli:main"
 transitiq-realtime = "transitiq_pipelines.realtime.cli:main"
+transitiq-ml = "transitiq_pipelines.ml.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["pipelines/src"]
