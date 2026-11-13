@@ -1,7 +1,8 @@
 """Assert gold results on the synthetic sample (CI, after `dbt build` on data_sample).
 
 The sample is built so the right answers are known (pipelines/.../silver/sample.py): six bus
-trips with fates ran, ran (8 min late), ran, ghost, canceled, partial. This checks the dbt
+trips with fates ran, ran (8 min late), ran, ghost, canceled, partial, plus a shuttle route
+whose buses never report positions (must not be judged at all). This checks the dbt
 logic end to end, not just that it runs.
 
     python scripts/check_sample_gold.py data_sample/warehouse/transitiq.duckdb
@@ -38,6 +39,10 @@ def main(db: str) -> int:
             "SB1-5": "partial",
         },
     )
+    shuttle = c.sql(
+        "select count(*) from gold.fact_ghost_trip where route_id = 'Shuttle-Sample'"
+    ).fetchone()[0]
+    expect("untracked shuttle trips are not judged (scheduled, never reported)", shuttle, 0)
     arrived = {t for (t,) in c.sql("select distinct trip_id from gold.fact_bus_arrival").fetchall()}
     expect("ghost/canceled trips have no arrivals", arrived & {"SB1-3", "SB1-4"}, set())
     bunches = c.sql(
